@@ -82,13 +82,13 @@ func (h *RunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(model.ErrorResponse{
+	_ = json.NewEncoder(w).Encode(model.ErrorResponse{
 		Error: model.ErrorDetail{Code: code, Message: message},
 	})
 }

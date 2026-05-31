@@ -5,7 +5,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -46,6 +45,3 @@ func envOrDefault(key, fallback string) string {
 	}
 	return fallback
 }
-
-// keep json import used via indirect reference in healthz
-var _ = json.Marshal

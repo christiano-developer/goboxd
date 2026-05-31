@@ -99,6 +99,12 @@ func Run(req *model.RunRequest, lang languages.Language) (*model.RunResponse, er
 	fullCmd := append([]string{lang.Run.Cmd}, runCmd...)
 	// Resolve {{artifact}} in the cmd itself (e.g. "./{{artifact}}")
 	fullCmd[0] = strings.ReplaceAll(fullCmd[0], "{{artifact}}", artifactPath)
+	if strings.HasPrefix(fullCmd[0], "./") {
+		cleaned := strings.TrimPrefix(fullCmd[0], "./")
+		if filepath.IsAbs(cleaned) {
+			fullCmd[0] = cleaned
+		}
+	}
 
 	resp.Tests = make([]model.TestResult, len(req.Tests))
 	firstNonAccepted := ""
