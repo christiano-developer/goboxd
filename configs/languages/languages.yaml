@@ -1,0 +1,45 @@
+# configs/languages/languages.yaml
+# Christiano Fernandes
+# 31 May 26
+# Language registry
+#
+#
+#
+
+languages:
+  - id: py3
+    name: Python 3
+    source_filename: solution.py
+    run:
+      cmd: /usr/bin/python3
+      args: ["{{source}}"]
+      limits:
+        wall_time_s: 9
+        memory_kb: 102400
+        max_processes: 100
+
+  - id: c
+    name: C
+    source_filename: solution.c
+    artifact: solution
+    build:
+      cmd: /usr/bin/gcc
+      args: ["{{source}}", "-o", "{{artifact}}", "-std=c11"]
+      limits:
+        wall_time_s: 15
+        memory_kb: 1048576
+        max_processes: 100
+      flag_allowlist:
+        - "-O0"
+        - "-O1"
+        - "-O2"
+        - "-Wall"
+        - "-Wextra"
+        - "-std=c11"
+        - "-std=c99"
+    run:
+      cmd: "./{{artifact}}"
+      limits:
+        wall_time_s: 10
+        memory_kb: 128000
+        max_processes: 32
