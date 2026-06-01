@@ -167,3 +167,22 @@ Summarized deliverables achieved (health check JSON, Python/C runs, tests passin
 
 **What we used / didn't use:**
 Accepted the summary and prepared to start writing the comprehensive documentation files.
+
+---
+
+## 2026-06-01 · Stage 3 Bounded Concurrency, Dynamic Scheduling, and Load-Adaptive Limits
+
+**Prompt:**
+Work on the concurrency and sustained load part. Discuss Docker container resource allocations, enforce minimum memory limits to prevent boot failures for Java and JavaScript, implement priority queueing (Shortest Job First with Starvation Aging), overload queue size limit at 500, dynamic Retry-After header calculations, and graceful shutdown.
+
+**Response summary:**
+Provided architecture and design details:
+- Bounded Concurrency: Channel-based semaphore to limit active jobs to 15, and Priority Queue (using `container/heap`) to hold up to 500 waiting requests.
+- SJF + Aging: Expected wall time cost score with wait-time aging subtractions to prevent starvation.
+- Under/Over-Allocation Clamping: Java/JS runs clamped to minimum 1 GB, other overrides clamped to safe maximums. Clamping modifications returned via a `warnings` field.
+- Load-Adaptive Capping: Sliding window tracker dynamically lowers maximum resource overrides when request rate exceeds 5 req/sec.
+- Graceful Shutdown: Captured SIGINT/SIGTERM to trigger `http.Server.Shutdown`.
+Implemented the changes across `pool.go`, `validate.go`, `handler.go`, `info.go`, and `main.go`.
+
+**What we used / didn't use:**
+Implemented all proposed changes. Verified with new test cases covering rate tracking, priority sorting, aging, and load-shedding.

@@ -1,17 +1,19 @@
 // cmd/goboxd/main.go
-// Christiano Fernandes
-// 31 May 26
-// http service root, healthz route
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/thesouldev/goboxd/internal/handler"
 	"github.com/thesouldev/goboxd/internal/languages"
+	"github.com/thesouldev/goboxd/internal/worker"
 )
 
 func main() {
@@ -23,9 +25,12 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("language registry loaded")
-	mux := http.NewServeMux()
-	// Initialize stats tracking
+
+	// Instantiate stats and pool
 	stats := &handler.ServerStats{}
+	pool := worker.NewConcurrencyPool(15, 500)
+
+	mux := http.NewServeMux()
 
 	// GET /healthz
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -33,19 +38,52 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
+
 	// GET /readyz
-	mux.Handle("GET /readyz", handler.NewReadyHandler(registry))
+	readyHandler := handler.NewReadyHandler(registry)
+	mux.Handle("GET /readyz", readyHandler)
+
 	// GET /info
-	mux.Handle("GET /info", handler.NewInfoHandler(registry, stats))
+	mux.Handle("GET /info", handler.NewInfoHandler(registry, stats, readyHandler, pool))
+
 	// POST /run
-	mux.Handle("POST /run", &handler.RunHandler{Registry: registry, Stats: stats})
-	addr := ":8080"
-	slog.Info("server starting", "addr", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		slog.Error("server failed", "err", err)
-		os.Exit(1)
+	mux.Handle("POST /run", &handler.RunHandler{
+		Registry: registry,
+		Stats:    stats,
+		Pool:     pool,
+	})
+
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: mux,
+	}
+
+	// Graceful shutdown channel
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		slog.Info("server starting", "addr", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("server failed", "err", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-stop
+	slog.Info("shutting down server gracefully...")
+
+	// 15 seconds window to drain in-flight requests
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		slog.Error("graceful shutdown failed", "err", err)
+	} else {
+		slog.Info("server stopped cleanly")
 	}
 }
+
 func envOrDefault(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

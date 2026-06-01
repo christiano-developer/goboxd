@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/thesouldev/goboxd/internal/model"
 )
 
 const (
@@ -90,3 +92,98 @@ func flagAllowed(flag string, allowlist []string) bool {
 	}
 	return false
 }
+
+// ResourceLimits validates and dynamically clamps resource overrides.
+// It returns a slice of warnings if any values were adjusted.
+func ResourceLimits(limits *model.Limits, langID string, reqRate float64) []string {
+	if limits == nil {
+		return nil
+	}
+
+	var warnings []string
+
+	// 1. Calculate load-adaptive maximum caps based on the current req rate
+	maxWallTime := 15
+	if reqRate > 5.0 {
+		// Reduce wall time by 0.5s per req/sec above 5, down to min 1s
+		reduced := 15 - int(0.5*(reqRate-5.0))
+		if reduced < 1 {
+			maxWallTime = 1
+		} else {
+			maxWallTime = reduced
+		}
+	}
+
+	maxProc := 128
+
+	// Memory caps depend on language compile/run requirements
+	maxMem := 524288 // 512 MB standard max
+	if langID == "java" || langID == "js" || langID == "c" || langID == "cpp" {
+		// JVM, Node, GCC/G++ build can use up to 2 GB
+		maxMem = 2097152
+	}
+	if reqRate > 5.0 {
+		// Reduce max memory by 50MB (51200KB) per req/sec above 5
+		reductionKB := int(51200 * (reqRate - 5.0))
+		if langID == "java" || langID == "js" {
+			// For Java/JS, never reduce below 1 GB (1048576 KB)
+			clamped := 2097152 - reductionKB
+			if clamped < 1048576 {
+				maxMem = 1048576
+			} else {
+				maxMem = clamped
+			}
+		} else {
+			clamped := maxMem - reductionKB
+			if clamped < 16384 { // absolute baseline 16 MB for other languages under load
+				maxMem = 16384
+			} else {
+				maxMem = clamped
+			}
+		}
+	}
+
+	// 2. Minimum baseline caps (under-allocation protection)
+	minMem := 16384 // 16 MB
+	if langID == "java" || langID == "js" {
+		minMem = 1048576 // 1 GB boot min
+	} else if langID == "c" || langID == "cpp" {
+		minMem = 262144 // 256 MB compile min
+	}
+
+	// Clamp WallTimeS
+	if limits.WallTimeS > 0 {
+		if limits.WallTimeS < 1 {
+			limits.WallTimeS = 1
+			warnings = append(warnings, "wall_time_s limit override is too low; clamped to minimum (1s)")
+		} else if limits.WallTimeS > maxWallTime {
+			limits.WallTimeS = maxWallTime
+			warnings = append(warnings, fmt.Sprintf("wall_time_s limit override exceeds load-adaptive cap; clamped to maximum (%ds)", maxWallTime))
+		}
+	}
+
+	// Clamp MemoryKB
+	if limits.MemoryKB > 0 {
+		if limits.MemoryKB < minMem {
+			limits.MemoryKB = minMem
+			warnings = append(warnings, fmt.Sprintf("memory_kb limit override is too low for runtime initialization; clamped to minimum (%d KB)", minMem))
+		} else if limits.MemoryKB > maxMem {
+			limits.MemoryKB = maxMem
+			warnings = append(warnings, fmt.Sprintf("memory_kb limit override exceeds load-adaptive cap; clamped to maximum (%d KB)", maxMem))
+		}
+	}
+
+	// Clamp MaxProcesses
+	if limits.MaxProcesses > 0 {
+		if limits.MaxProcesses < 1 {
+			limits.MaxProcesses = 1
+			warnings = append(warnings, "max_processes limit override is too low; clamped to minimum (1)")
+		} else if limits.MaxProcesses > maxProc {
+			limits.MaxProcesses = maxProc
+			warnings = append(warnings, fmt.Sprintf("max_processes limit override exceeds maximum cap; clamped to (%d)", maxProc))
+		}
+	}
+
+	return warnings
+}
+

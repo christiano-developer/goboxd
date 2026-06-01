@@ -1,4 +1,4 @@
-# System Architecture (Stage 2)
+# System Architecture (Stage 3)
 
 This document describes the internal structure, component design, and execution lifecycle of the **goboxd** sandbox service.
 
@@ -6,7 +6,7 @@ This document describes the internal structure, component design, and execution 
 
 ## 1. Component Architecture & Route Lifecycles
 
-The service consists of three core HTTP endpoints, wired through a centralized mapping registry and validator:
+The service consists of three core HTTP endpoints, wired through a centralized mapping registry, validator, and concurrency scheduler:
 
 ```mermaid
 graph TD
@@ -17,6 +17,7 @@ graph TD
 
     RunH --> Val[validate package]
     RunH --> Reg[languages Registry]
+    RunH --> Pool[worker.ConcurrencyPool]
     RunH --> Exec[executor package]
     Exec --> Sand[sandbox package]
     Sand --> NsJail[nsjail Binary]
@@ -25,32 +26,40 @@ graph TD
     ReadyH --> ExecLook[exec.LookPath Check]
 
     InfoH --> Reg
+    InfoH --> ReadyH
+    InfoH --> Pool
     InfoH --> Stats[atomic Request Counter]
 ```
 
 ### Request Lifecycles:
 
 #### POST /run (Code Execution)
-1. **Validation:** The HTTP request body is capped at 256 KiB. The `validate` package checks sizes, asserts test count limits (max 50), rejects path traversal filename patterns (`..`, `/`), and validates flags against the allow-list.
+1. **Validation & Clamping:** The HTTP request body is capped at 256 KiB. The `validate` package checks sizes, test bounds, and filenames. Per-request resource limits are dynamically validated and **clamped** instead of rejected:
+   * **Java/JS Min Memory:** Enforces a minimum of 1 GB memory mapping to prevent runtime boot crashes.
+   * **C/C++ Build Min Memory:** Enforces a minimum of 256 MB.
+   * **Load-Adaptive Upper Caps:** If the sliding window request rate exceeds 5 req/sec, maximum resource caps (memory, wall time) are dynamically scaled down to protect the host.
+   * **Warnings:** Clamped adjustments are logged and returned in the `warnings` array.
 2. **Registry Lookup:** Resolves the compilation and execution commands, default limits, and strategy flags for the specified language.
-3. **Execution Pipeline:** An ephemeral directory is created atomically using `os.MkdirTemp`. User code is written to this folder.
-   * **Compilation:** For compiled languages (`c`, `cpp`, `java`, `verilog`), the compiler executes under `nsjail` inside the workspace. If compilation fails, the executor returns `build_failed` and skips tests.
-   * **Test Run Loop:** Runs the compiled binary (or interpreter command) against each test case inside `nsjail`. Replaces placeholders (`{{source}}`, `{{artifact}}`, `{{flags}}`) dynamically.
-4. **Metrics Tracking:** Increments the global atomic processed requests counter upon successful output parsing.
-5. **Garbage Collection:** A deferred cleanup sweeps and deletes the temporary directory and all user workspace artifacts.
+3. **Concurrency Acquisition:** The request attempts to acquire a slot in the `worker.ConcurrencyPool`.
+   * If the pool is saturated (15 active slots + 500 queue slots are full), it rejects the request immediately with `503 Service Unavailable` and a dynamic `Retry-After` estimation header.
+   * If slots are full but the queue is not, the request is placed in a **Min-Heap Priority Queue** ordered by job cost (wall time and memory requested) with wait-time aging to prevent starvation.
+4. **Execution Pipeline:** An ephemeral directory is created using `os.MkdirTemp`.
+   * **Compilation:** For compiled languages, compiles inside the sandbox using `nsjail`.
+   * **Test Run Loop:** Runs the code inside `nsjail` against each test case sequentially.
+5. **Garbage Collection & Release:** The temporary directory is deleted, and the concurrency slot is released, triggering a queue re-heapify and scheduling the next job.
 
 #### GET /readyz (Readiness Check)
-To avoid high monitoring overhead, the `ReadyHandler` runs an assertion suite once upon server startup, caching the outcome:
-1. Verifies that the `nsjail` executable is present on the path.
-2. Loops through all registered language profiles and checks if their compiler or interpreter binaries exist using `exec.LookPath`.
-3. Runs a command-line probe check (e.g. `javac -version`) to verify that the environment can start the runtime process without resource issues.
-4. If any runtime fails to resolve or throws an execution error, the endpoint responds with `503 Service Unavailable` detailing the degraded dependencies. If all checks succeed, it returns `200 OK`.
+The `ReadyHandler` runs an assertion suite once upon server startup, caching the outcome:
+1. Verifies that `nsjail` is present.
+2. Resolves each language's compiler/runtime path.
+3. Runs dynamic version commands (e.g. `python3 --version`) to verify baseline execution.
+4. Serves cached status: `200 OK` or `503 Service Unavailable`.
 
 #### GET /info (Server Diagnostic metadata)
 Exposes active configuration constraints and live telemetry:
-1. Returns the server-wide limits enforced by the validator.
-2. Fetches and serializes all registered language configurations directly from the language registry.
-3. Performs a thread-safe read (`atomic.LoadUint64`) of the total execution runs processed since the server boot sequence.
+1. Returns limits: max source size, max tests, max concurrent jobs (15), and max queue size (500).
+2. Lists registered languages and their cached versions (populated from `ReadyHandler`).
+3. Stats tracking: returns `in_flight_jobs`, `queued_jobs`, `jobs_total`, `jobs_failed_internal`, `jobs_shed_total`, `last_internal_error_at`, and free space in the jail temp folder.
 
 ---
 
@@ -60,19 +69,21 @@ Exposes active configuration constraints and live telemetry:
 goboxd/
 ├── cmd/
 │   └── goboxd/
-│       └── main.go              # Service entry point; bootstraps configuration, counters, & routes
+│       └── main.go              # Service entry point; graceful shutdown signal loop & pool bootstrap
 ├── internal/
 │   ├── handler/
 │   │   ├── handler.go           # POST /run execution handler
-│   │   ├── ready.go             # GET /readyz startup health probe check
-│   │   └── info.go              # GET /info configurations & stats check
+│   │   ├── ready.go             # GET /readyz health check & version prober
+│   │   └── info.go              # GET /info configurations, saturation metrics, & stats check
+│   ├── worker/
+│   │   └── pool.go              # Priority queue (Min-Heap), RateTracker, and ExecutionTracker
 │   ├── validate/
-│   │   └── validate.go          # Filename checks, sizes, and flag validations
+│   │   └── validate.go          # Filename, size, flags, and load-adaptive resource limits clamping
 │   ├── languages/
-│   │   ├── config.go            # Language struct definitions (with yaml & json mapping tags)
-│   │   └── registry.go          # Configuration loading and maps cache registry
+│   │   ├── config.go            # Language struct definitions
+│   │   └── registry.go          # Registry cache registry
 │   ├── executor/
-│   │   └── executor.go          # Multi-stage sandboxed compiler & execution run loop
+│   │   └── executor.go          # Sandboxed compiler & execution run loop
 │   ├── sandbox/
 │   │   └── nsjail.go            # nsjail parameter generator
 │   └── model/
@@ -89,7 +100,12 @@ goboxd/
 
 ### Headless Sandboxed VMs Memory Isolation
 Java JVM and Node.js require massive virtual address space reservation at startup on 64-bit systems. Enforcing tight address space limits (`--rlimit_as` under nsjail) causes VM initialization crashes.
+We resolve this by:
+1. Enforcing a minimum override floor of 1 GB memory limit for Java and JS runs.
+2. Restricting internal physical heap size via command line args (`-Xmx128m` and `--max-old-space-size=128`). This maps virtual memory to satisfy VM boot while keeping actual physical RAM usage under ~40-50MB.
 
-We resolve this by combining two techniques:
-1. **Raising Address Space limits:** Setting memory limits for Java and Node.js execution runs to 1 GB.
-2. **Restricting Internal Heap & GC Pools:** Disabling heavy garbage collection defaults (`-XX:+UseSerialGC`) and JIT footprint optimization (`-XX:TieredStopAtLevel=1`), alongside specifying small heap allocations (`-Xms64m -Xmx128m` for Java, and `--max-old-space-size=128` for JavaScript). This keeps the actual RSS (physical memory) footprint low while letting the VMs boot successfully inside their sandboxed allocations.
+### Shortest Job First (SJF) Scheduling with Starvation Aging
+Under heavy load, processing long-running or high-memory jobs first creates queue head-of-line blocking. We utilize a Min-Heap sorted by expected cost. To prevent heavy requests from starving indefinitely, we subtract an aging factor of `2.0 * wait_time_seconds` from the priority score, ensuring all requests eventually get scheduled.
+
+### Load-Adaptive Limit Clamping
+To survive massive spikes, the validator monitors request rate over a sliding 10-second window. Above 5 req/sec, the maximum allowed overrides are progressively clamped down, forcing heavy requests to use smaller, safer runtime boundaries and protecting the host from OOM.

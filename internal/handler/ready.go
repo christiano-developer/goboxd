@@ -20,6 +20,17 @@ type ReadyHandler struct {
 	healthy  bool
 }
 
+// GetNsjailStatus returns the cached status of nsjail.
+func (h *ReadyHandler) GetNsjailStatus() NsjailStatus {
+	return h.response.Nsjail
+}
+
+// GetLanguageStatus returns the cached status of a language by its ID.
+func (h *ReadyHandler) GetLanguageStatus(id string) (LangStatus, bool) {
+	status, ok := h.response.Languages[id]
+	return status, ok
+}
+
 type ReadyResponse struct {
 	Status    string                `json:"status"`
 	Nsjail    NsjailStatus          `json:"nsjail"`

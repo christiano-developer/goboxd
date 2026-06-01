@@ -14,6 +14,7 @@ import (
 	"github.com/thesouldev/goboxd/internal/handler"
 	"github.com/thesouldev/goboxd/internal/languages"
 	"github.com/thesouldev/goboxd/internal/model"
+	"github.com/thesouldev/goboxd/internal/worker"
 )
 
 func setupServer(t *testing.T) *httptest.Server {
@@ -32,9 +33,11 @@ func setupServer(t *testing.T) *httptest.Server {
 	}
 	mux := http.NewServeMux()
 	stats := &handler.ServerStats{}
-	mux.Handle("GET /readyz", handler.NewReadyHandler(reg))
-	mux.Handle("GET /info", handler.NewInfoHandler(reg, stats))
-	mux.Handle("POST /run", &handler.RunHandler{Registry: reg, Stats: stats})
+	pool := worker.NewConcurrencyPool(15, 500)
+	readyHandler := handler.NewReadyHandler(reg)
+	mux.Handle("GET /readyz", readyHandler)
+	mux.Handle("GET /info", handler.NewInfoHandler(reg, stats, readyHandler, pool))
+	mux.Handle("POST /run", &handler.RunHandler{Registry: reg, Stats: stats, Pool: pool})
 	return httptest.NewServer(mux)
 }
 
@@ -206,8 +209,8 @@ func TestInfoEndpoint(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		t.Fatalf("decode info: %v", err)
 	}
-	if _, ok := data["nsjail_version"]; !ok {
-		t.Error("missing nsjail_version in info response")
+	if _, ok := data["nsjail"]; !ok {
+		t.Error("missing nsjail block in info response")
 	}
 	if _, ok := data["languages"]; !ok {
 		t.Error("missing languages list in info response")

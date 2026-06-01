@@ -7,9 +7,10 @@
 package model
 
 type RunResponse struct {
-	Status string       `json:"status"`
-	Build  *BuildResult `json:"build,omitempty"`
-	Tests  []TestResult `json:"tests"`
+	Status   string       `json:"status"`
+	Build    *BuildResult `json:"build,omitempty"`
+	Tests    []TestResult `json:"tests"`
+	Warnings []string     `json:"warnings,omitempty"`
 }
 
 type BuildResult struct {
