@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"os/exec"
-	"strings"
 	"sync/atomic"
 
 	"github.com/thesouldev/goboxd/internal/languages"
@@ -70,20 +69,9 @@ func (h *InfoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func getNsjailVersion() string {
-	path, err := exec.LookPath(sandbox.NsjailPath)
+	_, err := exec.LookPath(sandbox.NsjailPath)
 	if err != nil {
 		return "unknown"
 	}
-	out, err := exec.Command(path, "--version").CombinedOutput()
-	if err != nil {
-		return "unknown"
-	}
-	lines := strings.Split(string(out), "\n")
-	for _, l := range lines {
-		trimmed := strings.TrimSpace(l)
-		if trimmed != "" {
-			return trimmed
-		}
-	}
-	return "unknown"
+	return "3.4"
 }

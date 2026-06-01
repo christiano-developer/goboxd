@@ -4,29 +4,29 @@
 package languages
 
 type Language struct {
-	ID                       string       `yaml:"id"`
-	Name                     string       `yaml:"name"`
-	SourceFilename           string       `yaml:"source_filename,omitempty"`
-	SourceFilenameStrategy   string       `yaml:"source_filename_strategy,omitempty"`
-	Artifact                 string       `yaml:"artifact,omitempty"`
-	ArtifactFilenameStrategy string       `yaml:"artifact_filename_strategy,omitempty"`
-	Build                    *PhaseConfig `yaml:"build,omitempty"`
-	Run                      PhaseConfig  `yaml:"run"`
+	ID                       string       `yaml:"id" json:"id"`
+	Name                     string       `yaml:"name" json:"name"`
+	SourceFilename           string       `yaml:"source_filename,omitempty" json:"source_filename,omitempty"`
+	SourceFilenameStrategy   string       `yaml:"source_filename_strategy,omitempty" json:"source_filename_strategy,omitempty"`
+	Artifact                 string       `yaml:"artifact,omitempty" json:"artifact,omitempty"`
+	ArtifactFilenameStrategy string       `yaml:"artifact_filename_strategy,omitempty" json:"artifact_filename_strategy,omitempty"`
+	Build                    *PhaseConfig `yaml:"build,omitempty" json:"build,omitempty"`
+	Run                      PhaseConfig  `yaml:"run" json:"run"`
 }
 
 type PhaseConfig struct {
-	Cmd           string   `yaml:"cmd"`
-	Args          []string `yaml:"args"`
-	Limits        Limits   `yaml:"limits"`
-	FlagAllowlist []string `yaml:"flag_allowlist,omitempty"`
+	Cmd           string   `yaml:"cmd" json:"cmd"`
+	Args          []string `yaml:"args" json:"args"`
+	Limits        Limits   `yaml:"limits" json:"limits"`
+	FlagAllowlist []string `yaml:"flag_allowlist,omitempty" json:"flag_allowlist,omitempty"`
 }
 
 type Limits struct {
-	WallTimeS    int `yaml:"wall_time_s"`
-	MemoryKB     int `yaml:"memory_kb"`
-	MaxProcesses int `yaml:"max_processes"`
+	WallTimeS    int `yaml:"wall_time_s" json:"wall_time_s"`
+	MemoryKB     int `yaml:"memory_kb" json:"memory_kb"`
+	MaxProcesses int `yaml:"max_processes" json:"max_processes"`
 }
 
 type RegistryFile struct {
-	Languages []Language `yaml:"languages"`
+	Languages []Language `yaml:"languages" json:"languages"`
 }

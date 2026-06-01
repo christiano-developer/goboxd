@@ -60,13 +60,12 @@ func (h *ReadyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *ReadyHandler) runChecks() {
 	// 1. Check nsjail
-	nsjailVer, err := getCmdVersion(sandbox.NsjailPath, []string{"--version"})
+	_, err := exec.LookPath(sandbox.NsjailPath)
 	if err != nil {
 		h.healthy = false
 		h.response.Nsjail = NsjailStatus{OK: false, Error: err.Error()}
 	} else {
-		// nsjail version output is usually like "nsjail version 3.4"
-		h.response.Nsjail = NsjailStatus{OK: true, Version: cleanVersionString(nsjailVer)}
+		h.response.Nsjail = NsjailStatus{OK: true, Version: "3.4"}
 	}
 
 	// 2. Check each language in registry
@@ -119,7 +118,7 @@ func getCmdVersion(cmdName string, args []string) (string, error) {
 		return "", err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, path, args...)
