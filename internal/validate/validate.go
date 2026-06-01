@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	MaxSourceBytes = 256 * 1024 // 256 KiB
-	MaxTests       = 50
-	MaxFilenameLen = 128
-	MaxStdinBytes  = 64 * 1024 // 64 KiB per test stdin
+	MaxSourceBytes      = 256 * 1024 // 256 KiB
+	MaxTests            = 50
+	MaxFilenameLen      = 128
+	MaxStdinBytes       = 64 * 1024 // 64 KiB per test stdin
+	MaxRequestBodyBytes = 4 * 1024 * 1024 // 4 MiB max HTTP body limit
 )
 
 func Filename(s string) error {
@@ -186,4 +187,19 @@ func ResourceLimits(limits *model.Limits, langID string, reqRate float64) []stri
 
 	return warnings
 }
+
+// TestInputs validates that the stdin and expected output sizes for all test cases 
+// do not exceed MaxStdinBytes to prevent memory exhaustion attacks.
+func TestInputs(tests []model.TestCase) error {
+	for i, tc := range tests {
+		if len(tc.Stdin) > MaxStdinBytes {
+			return fmt.Errorf("test case %d stdin exceeds max size of %d bytes", i, MaxStdinBytes)
+		}
+		if len(tc.ExpectedStdout) > MaxStdinBytes {
+			return fmt.Errorf("test case %d expected stdout exceeds max size of %d bytes", i, MaxStdinBytes)
+		}
+	}
+	return nil
+}
+
 

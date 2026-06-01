@@ -289,3 +289,28 @@ func (c *cappedWriter) Write(p []byte) (int, error) {
 	c.written += n
 	return n, err
 }
+
+// SweepOrphans scans the system temp directory for stale goboxd-* directories
+// older than maxAge and removes them to clean up orphans from previous runs or crashes.
+func SweepOrphans(maxAge time.Duration) error {
+	tempDir := os.TempDir()
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "goboxd-") {
+			path := filepath.Join(tempDir, entry.Name())
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			if now.Sub(info.ModTime()) > maxAge {
+				_ = os.RemoveAll(path) // Best effort removal
+			}
+		}
+	}
+	return nil
+}

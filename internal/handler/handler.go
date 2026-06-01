@@ -31,8 +31,8 @@ func (h *RunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"remote_addr", r.RemoteAddr,
 	)
 
-	// Cap request body to 256 KiB
-	r.Body = http.MaxBytesReader(w, r.Body, validate.MaxSourceBytes)
+	// Cap request body to 4 MiB
+	r.Body = http.MaxBytesReader(w, r.Body, validate.MaxRequestBodyBytes)
 
 	var req model.RunRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -65,6 +65,13 @@ func (h *RunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Validate test count
 	if err := validate.TestCount(len(req.Tests)); err != nil {
+		slog.Warn("validation failed", "code", "invalid_tests", "err", err)
+		writeError(w, http.StatusBadRequest, "invalid_tests", err.Error())
+		return
+	}
+
+	// Validate individual test case stdin/output sizes
+	if err := validate.TestInputs(req.Tests); err != nil {
 		slog.Warn("validation failed", "code", "invalid_tests", "err", err)
 		writeError(w, http.StatusBadRequest, "invalid_tests", err.Error())
 		return

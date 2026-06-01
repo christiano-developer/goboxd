@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/thesouldev/goboxd/internal/executor"
 	"github.com/thesouldev/goboxd/internal/handler"
 	"github.com/thesouldev/goboxd/internal/languages"
 	"github.com/thesouldev/goboxd/internal/worker"
@@ -19,6 +20,13 @@ import (
 func main() {
 	// Configure global structured JSON logger
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
+	// Clean up stale orphan directories from previous runs/crashes
+	if err := executor.SweepOrphans(5 * time.Minute); err != nil {
+		slog.Warn("failed to sweep orphan directories at startup", "err", err)
+	} else {
+		slog.Info("startup orphan directory sweep completed")
+	}
 
 	// Load language registry
 	configPath := envOrDefault("LANGUAGE_CONFIG", "configs/languages/languages.yaml")
