@@ -15,9 +15,11 @@ import (
 )
 
 type RunRequest struct {
-	Language string     `json:"language"`
-	Source   string     `json:"source"`
-	Tests    []TestCase `json:"tests"`
+	Language         string     `json:"language"`
+	Source           string     `json:"source"`
+	SourceFilename   string     `json:"source_filename,omitempty"`
+	ArtifactFilename string     `json:"artifact_filename,omitempty"`
+	Tests            []TestCase `json:"tests"`
 }
 
 type TestCase struct {
@@ -29,10 +31,59 @@ type RunResponse struct {
 	Status string `json:"status"`
 }
 
+type PayloadConfig struct {
+	Language         string
+	Source           string
+	SourceFilename   string
+	ArtifactFilename string
+	ExpectedStdout   string
+}
+
+var payloads = map[string]PayloadConfig{
+	"py3": {
+		Language:       "py3",
+		Source:         "print('hello')",
+		ExpectedStdout: "hello\n",
+	},
+	"c": {
+		Language:       "c",
+		Source:         "#include <stdio.h>\nint main() { printf(\"hello\\n\"); return 0; }",
+		ExpectedStdout: "hello\n",
+	},
+	"cpp": {
+		Language:       "cpp",
+		Source:         "#include <iostream>\nint main() { std::cout << \"hello\\n\"; return 0; }",
+		ExpectedStdout: "hello\n",
+	},
+	"java": {
+		Language:         "java",
+		Source:           "public class Main { public static void main(String[] args) { System.out.println(\"hello\"); } }",
+		SourceFilename:   "Main.java",
+		ArtifactFilename: "Main",
+		ExpectedStdout:   "hello\n",
+	},
+	"bash": {
+		Language:       "bash",
+		Source:         "echo 'hello'",
+		ExpectedStdout: "hello\n",
+	},
+	"js": {
+		Language:       "js",
+		Source:         "console.log('hello')",
+		ExpectedStdout: "hello\n",
+	},
+	"verilog": {
+		Language:       "verilog",
+		Source:         "module Main; initial begin $display(\"hello\"); $finish; end endmodule",
+		ExpectedStdout: "hello\n",
+	},
+}
+
 func main() {
 	concurrency := flag.Int("c", 10, "Number of concurrent workers")
 	totalReqs := flag.Int("n", 100, "Total number of requests to run")
 	targetURL := flag.String("url", "http://localhost:8080/run", "Target endpoint URL")
+	lang := flag.String("lang", "py3", "Language payload to run (py3, c, cpp, java, bash, js, verilog)")
 	flag.Parse()
 
 	if *concurrency <= 0 || *totalReqs <= 0 {
@@ -40,11 +91,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	config, ok := payloads[*lang]
+	if !ok {
+		fmt.Printf("Unsupported language: %s. Supported: py3, c, cpp, java, bash, js, verilog\n", *lang)
+		os.Exit(1)
+	}
+
 	payload := RunRequest{
-		Language: "py3",
-		Source:   "print('hello')",
+		Language:         config.Language,
+		Source:           config.Source,
+		SourceFilename:   config.SourceFilename,
+		ArtifactFilename: config.ArtifactFilename,
 		Tests: []TestCase{
-			{Stdin: "", ExpectedStdout: "hello\n"},
+			{Stdin: "", ExpectedStdout: config.ExpectedStdout},
 		},
 	}
 	payloadBytes, err := json.Marshal(payload)
@@ -54,7 +113,7 @@ func main() {
 	}
 
 	fmt.Printf("Starting load test against %s\n", *targetURL)
-	fmt.Printf("Concurrency: %d, Total Requests: %d\n", *concurrency, *totalReqs)
+	fmt.Printf("Language: %s, Concurrency: %d, Total Requests: %d\n", *lang, *concurrency, *totalReqs)
 
 	jobs := make(chan int, *totalReqs)
 	for i := 0; i < *totalReqs; i++ {
