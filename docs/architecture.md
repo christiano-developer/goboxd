@@ -34,7 +34,7 @@ graph TD
 ### Request Lifecycles:
 
 #### POST /run (Code Execution)
-1. **Validation & Clamping:** The HTTP request body is capped at 256 KiB. The `validate` package checks sizes, test bounds, and filenames. Per-request resource limits are dynamically validated and **clamped** instead of rejected:
+1. **Validation & Clamping:** The HTTP request body is capped at 4 MiB. The `validate` package checks that the source code does not exceed 256 KiB, individual test case stdin and expected output sizes do not exceed 64 KiB, and test counts do not exceed 50. It also enforces single-path component filenames (mitigating path traversal). Per-request resource limits are dynamically validated and **clamped** instead of rejected:
    * **Java/JS Min Memory:** Enforces a minimum of 1 GB memory mapping to prevent runtime boot crashes.
    * **C/C++ Build Min Memory:** Enforces a minimum of 256 MB.
    * **Load-Adaptive Upper Caps:** If the sliding window request rate exceeds 5 req/sec, maximum resource caps (memory, wall time) are dynamically scaled down to protect the host.

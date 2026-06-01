@@ -79,5 +79,18 @@ This ensures that the runtimes boot successfully and execute with minimal physic
 ### Path Traversal Mitigation
 The HTTP validator package (`internal/validate`) blocks request filenames containing path separators (`/`, `\`) or dot prefixes (`.`, `..`). This ensures user source files are written strictly inside the unique workspace directory created by `os.MkdirTemp`, making directory traversal out of the workspace boundary impossible.
 
+### Strict Request Size Limits
+To prevent denial of service (DoS) and memory exhaustion attacks at the HTTP parsing layer, we enforce strict boundaries:
+* **HTTP Body Capping**: The total HTTP request body read is capped at **4 MiB** (`MaxRequestBodyBytes`) in the handler.
+* **Component-Level Limits**:
+  * **Source Code size**: Capped at **256 KiB** (`MaxSourceBytes`).
+  * **Test Count**: Capped at **50** max cases (`MaxTests`).
+  * **Per-Test Inputs**: Each test case's `Stdin` and `ExpectedStdout` are validated to not exceed **64 KiB** (`MaxStdinBytes`).
+
 ### Output Truncation
-To prevent user code from flooding stdout/stderr and consuming infinite heap space, the executor reads streams via an `io.LimitReader` capped at `64 KiB`. Any output exceeding this cap is discarded, and a truncation marker is appended.
+To prevent runaway programs inside the sandbox from flooding stdout/stderr and OOM-ing the Go host process during response capture, the executor limits the read buffer size. Streams are read via an `io.LimitReader` capped at **64 KiB** (`maxOutputBytes`). Any output exceeding this cap is discarded, and a truncation marker is appended.
+
+### Stale Jail Directory Cleanup
+To prevent disk exhaustion from orphaned sandbox directories:
+* **Exit-Path Cleanup**: Every exit path in execution runs within a `defer os.RemoveAll(workDir)` scope to clean up workspaces immediately.
+* **Startup Orphan Sweep**: Upon server boot, a background garbage collection sweep (`executor.SweepOrphans`) scans `/tmp` and removes any stale `goboxd-*` directories older than **5 minutes**.
