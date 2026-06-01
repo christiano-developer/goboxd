@@ -23,6 +23,8 @@ type Config struct {
 	MaxPIDs int
 	// Command is the program to run inside the sandbox (e.g. ["python3", "solution.py"]).
 	Command []string
+	// UID is the unique user ID mapped to this request execution.
+	UID int
 }
 
 // Build returns an exec.Cmd that runs Command inside an nsjail sandbox.
@@ -62,12 +64,24 @@ func Build(cfg Config) (*exec.Cmd, error) {
 		// Pass clean standard PATH for compiler sub-commands (like ld and as)
 		"--env", "PATH=/usr/bin:/bin",
 
+		// Disable mounting procfs to bypass Docker's /proc overmount restriction
+		"--disable_proc",
+
 		// Log only fatal errors from nsjail to stderr (default FD 2)
 		"--really_quiet",
+	}
 
+	if cfg.UID > 0 {
+		args = append(args,
+			"--uid_mapping", fmt.Sprintf("%d:%d:1", cfg.UID, cfg.UID),
+			"--gid_mapping", fmt.Sprintf("%d:%d:1", cfg.UID, cfg.UID),
+		)
+	}
+
+	args = append(args,
 		// Separator between nsjail args and the command to run
 		"--",
-	}
+	)
 
 	// Append the actual command
 	args = append(args, cfg.Command...)

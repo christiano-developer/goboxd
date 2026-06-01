@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/thesouldev/goboxd/internal/languages"
@@ -23,6 +24,16 @@ const (
 	truncMarker    = "\n[TRUNCATED]"
 )
 
+var uidCounter uint32
+
+// nextUID returns a process-unique UID in the range [100000, 1001099999]
+// to prevent namespace collisions under concurrent load.
+func nextUID() int {
+	c := atomic.AddUint32(&uidCounter, 1)
+	pid := os.Getpid()
+	return 100000 + (pid%100000)*10000 + int(c%10000)
+}
+
 // Run executes a RunRequest end-to-end and returns a RunResponse.
 func Run(req *model.RunRequest, lang languages.Language) (*model.RunResponse, error) {
 	// Create a unique temp directory for this request — never reuse
@@ -32,6 +43,13 @@ func Run(req *model.RunRequest, lang languages.Language) (*model.RunResponse, er
 	}
 	// Always clean up, even on panic
 	defer os.RemoveAll(workDir)
+
+	// Ensure the sandbox user (running under a mapped unprivileged UID) has full read/write access
+	if err := os.Chmod(workDir, 0777); err != nil {
+		return nil, fmt.Errorf("chmod workdir: %w", err)
+	}
+
+	reqUID := nextUID()
 
 	// Determine source filename
 	srcFilename := lang.SourceFilename
@@ -77,6 +95,7 @@ func Run(req *model.RunRequest, lang languages.Language) (*model.RunResponse, er
 			MemoryKB:     limits.MemoryKB,
 			MaxPIDs:      limits.MaxProcesses,
 			Command:      append([]string{lang.Build.Cmd}, buildCmd...),
+			UID:          reqUID,
 		}, "")
 		durationMs := time.Since(start).Milliseconds()
 
@@ -148,6 +167,7 @@ func Run(req *model.RunRequest, lang languages.Language) (*model.RunResponse, er
 			MemoryKB:     runLimits.MemoryKB,
 			MaxPIDs:      runLimits.MaxProcesses,
 			Command:      fullCmd,
+			UID:          reqUID,
 		}, tc.Stdin)
 		durationMs := time.Since(start).Milliseconds()
 

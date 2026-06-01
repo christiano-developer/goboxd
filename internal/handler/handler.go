@@ -3,6 +3,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -24,23 +25,32 @@ type RunHandler struct {
 }
 
 func (h *RunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	slog.Info("incoming request",
+		"method", r.Method,
+		"path", r.URL.Path,
+		"remote_addr", r.RemoteAddr,
+	)
+
 	// Cap request body to 256 KiB
 	r.Body = http.MaxBytesReader(w, r.Body, validate.MaxSourceBytes)
 
 	var req model.RunRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.Warn("request decoding failed", "err", err)
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
 
 	// Validate language
 	if req.Language == "" {
+		slog.Warn("validation failed", "code", "missing_language", "msg", "language is required")
 		writeError(w, http.StatusBadRequest, "missing_language", "language is required")
 		return
 	}
 
 	lang, err := h.Registry.Get(req.Language)
 	if err != nil {
+		slog.Warn("validation failed", "code", "unknown_language", "language", req.Language)
 		writeError(w, http.StatusBadRequest, "unknown_language",
 			"language "+req.Language+" is not supported")
 		return
@@ -48,12 +58,14 @@ func (h *RunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Validate source
 	if err := validate.SourceSize(req.Source); err != nil {
+		slog.Warn("validation failed", "code", "invalid_source", "err", err)
 		writeError(w, http.StatusBadRequest, "invalid_source", err.Error())
 		return
 	}
 
 	// Validate test count
 	if err := validate.TestCount(len(req.Tests)); err != nil {
+		slog.Warn("validation failed", "code", "invalid_tests", "err", err)
 		writeError(w, http.StatusBadRequest, "invalid_tests", err.Error())
 		return
 	}
@@ -61,12 +73,14 @@ func (h *RunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Validate optional filenames
 	if req.SourceFilename != "" {
 		if err := validate.Filename(req.SourceFilename); err != nil {
+			slog.Warn("validation failed", "code", "invalid_filename", "field", "SourceFilename", "err", err)
 			writeError(w, http.StatusBadRequest, "invalid_filename", err.Error())
 			return
 		}
 	}
 	if req.ArtifactFilename != "" {
 		if err := validate.Filename(req.ArtifactFilename); err != nil {
+			slog.Warn("validation failed", "code", "invalid_filename", "field", "ArtifactFilename", "err", err)
 			writeError(w, http.StatusBadRequest, "invalid_filename", err.Error())
 			return
 		}
@@ -75,6 +89,7 @@ func (h *RunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Validate flags against per-language allowlist
 	if req.Build != nil && lang.Build != nil {
 		if err := validate.Flags(req.Build.Flags, lang.Build.FlagAllowlist); err != nil {
+			slog.Warn("validation failed", "code", "disallowed_flag", "err", err)
 			writeError(w, http.StatusBadRequest, "disallowed_flag", err.Error())
 			return
 		}
@@ -111,11 +126,19 @@ func (h *RunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		memKB = req.Run.Limits.MemoryKB
 	}
 
+	active, queued, totalShed := h.Pool.GetStats()
+	slog.Info("queue status before acquire",
+		"active_workers", active,
+		"queued_jobs", queued,
+		"total_shed", totalShed,
+		"cost", cost,
+	)
+
 	// Acquire concurrency slot (block in priority queue or reject if queue is saturated)
 	err = h.Pool.Acquire(r.Context(), cost, memKB)
 	if err != nil {
 		if err == worker.ErrQueueFull {
-			_, queued, _ := h.Pool.GetStats()
+			_, queued, _ = h.Pool.GetStats()
 			avgDur := h.Pool.ExecutionTracker.GetAverage()
 			maxActive := h.Pool.GetMaxActive()
 
@@ -125,15 +148,28 @@ func (h *RunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				estWaitSecs = 1
 			}
 
+			slog.Warn("load shedding triggered",
+				"reason", "queue_full",
+				"queued_jobs", queued,
+				"retry_after_secs", estWaitSecs,
+			)
+
 			w.Header().Set("Retry-After", strconv.Itoa(estWaitSecs))
 			writeError(w, http.StatusServiceUnavailable, "service_unavailable", "server overload: queue is full")
 			return
 		}
 		// Request context cancelled / timeout
+		slog.Warn("acquire cancelled or timed out", "err", err)
 		writeError(w, http.StatusRequestTimeout, "request_timeout", err.Error())
 		return
 	}
 	defer h.Pool.Release()
+
+	active, queued, _ = h.Pool.GetStats()
+	slog.Info("slot acquired, starting execution",
+		"active_workers", active,
+		"queued_jobs", queued,
+	)
 
 	// Track active execution state
 	atomic.AddInt64(&h.Stats.InFlightJobs, 1)
@@ -147,6 +183,10 @@ func (h *RunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		atomic.AddUint64(&h.Stats.JobsFailedInternal, 1)
 		atomic.StoreInt64(&h.Stats.LastInternalErrorAt, time.Now().Unix())
+		slog.Error("execution failed internally",
+			"err", err,
+			"duration_ms", execDur.Milliseconds(),
+		)
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
@@ -156,6 +196,15 @@ func (h *RunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Pool.ExecutionTracker.AddDuration(execDur)
 
 	resp.Warnings = warnings
+
+	active, queued, _ = h.Pool.GetStats()
+	slog.Info("execution completed",
+		"status", resp.Status,
+		"duration_ms", execDur.Milliseconds(),
+		"active_workers", active,
+		"queued_jobs", queued,
+		"warnings_count", len(warnings),
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

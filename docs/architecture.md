@@ -98,6 +98,10 @@ goboxd/
 
 ## 3. Key Design Decisions
 
+### Nested Container Namespace Hardening & UID Isolation
+Under concurrent load, running sandboxes under identical UIDs poses security risks. We resolved this by assigning a process-unique UID to each execution via an atomic counter and PID mapping.
+Furthermore, we hardened the Docker boundary by removing `privileged: true` from the container configuration. Because Docker mounts masked paths over `/proc` inside standard containers for security, nested mount namespaces fail to mount a new `procfs` without host-level privileges. We bypassed this by disabling `procfs` mounting inside the jail (`--disable_proc`), enabling `nsjail` to run with unprivileged user namespaces under the narrow `SYS_ADMIN` capability.
+
 ### Headless Sandboxed VMs Memory Isolation
 Java JVM and Node.js require massive virtual address space reservation at startup on 64-bit systems. Enforcing tight address space limits (`--rlimit_as` under nsjail) causes VM initialization crashes.
 We resolve this by:

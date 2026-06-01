@@ -17,6 +17,9 @@ import (
 )
 
 func main() {
+	// Configure global structured JSON logger
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
 	// Load language registry
 	configPath := envOrDefault("LANGUAGE_CONFIG", "configs/languages/languages.yaml")
 	registry, err := languages.Load(configPath)

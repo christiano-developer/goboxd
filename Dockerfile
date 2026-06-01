@@ -19,8 +19,10 @@ RUN git clone --depth 1 --branch ${NSJAIL_VERSION} https://github.com/google/nsj
 FROM golang:${GO_VERSION}-${DEBIAN_VERSION} AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libnl-route-3-200 libprotobuf32 python3 \
-        default-jdk nodejs iverilog \
-    && rm -rf /var/lib/apt/lists/*
+        default-jdk nodejs iverilog uidmap \
+    && rm -rf /var/lib/apt/lists/* \
+    && echo "root:100000:1000000000" > /etc/subuid \
+    && echo "root:100000:1000000000" > /etc/subgid
 COPY --from=nsjail-builder /usr/local/bin/nsjail /usr/local/bin/nsjail
 RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 WORKDIR /src
@@ -34,8 +36,10 @@ FROM debian:${DEBIAN_VERSION}-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates libnl-route-3-200 libprotobuf32 \
         python3 gcc libc6-dev \
-        g++ default-jdk nodejs iverilog \
-    && rm -rf /var/lib/apt/lists/*
+        g++ default-jdk nodejs iverilog uidmap \
+    && rm -rf /var/lib/apt/lists/* \
+    && echo "root:100000:1000000000" > /etc/subuid \
+    && echo "root:100000:1000000000" > /etc/subgid
 COPY --from=nsjail-builder /usr/local/bin/nsjail /usr/local/bin/nsjail
 COPY --from=builder        /out/goboxd          /usr/local/bin/goboxd
 COPY configs/ /configs/

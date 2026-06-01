@@ -26,7 +26,8 @@ The service implements a defense-in-depth model, wrapping executing user code in
 ### Layer 1: Docker Container Boundaries
 * The `goboxd` Go server and the compiler/interpreter toolchains execute inside a Debian container.
 * The container isolates the compilation tools and dependencies from the host machine.
-* *Note:* To orchestrate jails inside a container, Docker runs with `privileged: true` or custom cap grants (`CAP_SYS_ADMIN`), making Layer 2 (nsjail) critical for workload isolation.
+* **Minimal Privileges (Host Security Hardening)**: The container is configured with the specific `SYS_ADMIN` capability (`cap_add: [SYS_ADMIN]`) along with unconfined Seccomp/AppArmor security options, instead of the broad and insecure `privileged: true`.
+* **Procfs Overmount Bypass (`--disable_proc`)**: Inside non-privileged containers, Docker mounts "masked" paths over `/proc` (e.g., `/proc/kcore` mapped to `/dev/null`) to block host kernel leaks. Under Linux namespace rules, creating a nested namespace and mounting a new `procfs` over a masked procfs is blocked with `Operation not permitted`. We bypassed this restriction cleanly by passing the `--disable_proc` flag to `nsjail`, which completely disables procfs mounting inside the jail. Compilers and interpreters execute successfully without `/proc`.
 
 ### Layer 2: nsjail Sandboxing
 `nsjail` is a lightweight, secure sandboxing tool utilizing Linux kernel features (namespaces, cgroups, seccomp filters) to run processes under strict resource constraints.
@@ -42,7 +43,10 @@ Every code execution runs in its own clean set of Linux namespaces:
 * **Network Namespace (`CLONE_NEWNET`)**: Disables network access inside the sandbox, preventing user code from making outbound connections or running reverse shells.
 * **IPC Namespace (`CLONE_NEWIPC`)**: Prevents communication via system-level IPC pipelines (shared memory, message queues).
 * **UTS Namespace (`CLONE_NEWUTS`)**: Isolates hostnames.
-* **User Namespace (`CLONE_NEWUSER`)**: Maps the internal sandbox user (acting as `root` inside the jail) to a non-privileged UID on the host system, neutralizing privilege escalation vectors.
+* **User Namespace (`CLONE_NEWUSER`) & UID Isolation**: Maps the internal sandbox user (acting as `root` inside the jail) to a process-unique, unprivileged UID on the host system, neutralizing privilege escalation vectors. 
+  To prevent UID collisions under concurrent load, `goboxd` allocates a unique UID for each request using a thread-safe atomic counter and process ID:
+  $$\text{UID} = 100000 + (\text{PID} \bmod 100000) \times 10000 + (\text{counter} \bmod 10000)$$
+  This guarantees that concurrent requests run under strictly distinct UIDs, preventing them from interacting with each other's processes or accessing sibling temp directories (which are set to `0777` permissions to allow access to the unprivileged UID).
 
 ### Filesystem Isolation
 * **Read-Only Root (`--chroot /`)**: The host root filesystem is mounted as read-only. User code cannot modify compiler libraries, interpreters, or configuration files.
