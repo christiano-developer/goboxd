@@ -30,3 +30,17 @@ Under extreme overload (**600 concurrent clients** sending 1200 total requests),
 *   **Processed successfully (HTTP 200)**: 565 requests.
 *   **Rejected immediately (HTTP 503 Service Unavailable)**: 635 requests.
 *   **Dynamic Wait Estimation**: Rejected requests successfully returned the `Retry-After` header indicating estimated wait time.
+
+---
+
+## Other Supported Languages Verification
+
+Verification tests were also run for C, Java, and JavaScript (Node.js) payloads to verify that the sandbox compilation pipelines and memory caps function correctly:
+
+*   **C (`c`)**: Compiles and executes a simple print under `nsjail`.
+    *   2 concurrent clients, 10 requests: **28.24 req/sec**, average latency **70.66ms** ($p_{50}$ **25.17ms**).
+*   **Java (`java`)**: Compiles with `javac` and launches JVM under `nsjail` (validated with 1 GB memory limit floor).
+    *   2 concurrent clients, 6 requests: **6.24 req/sec**, average latency **315.91ms** ($p_{50}$ **285.78ms**).
+*   **JavaScript (`js`)**: Evaluates Node.js execution under `nsjail` (validated with 1 GB memory limit floor).
+    *   2 concurrent clients, 10 requests: **21.97 req/sec**, average latency **91.01ms** ($p_{50}$ **57.26ms**).
+
