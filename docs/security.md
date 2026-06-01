@@ -1,4 +1,4 @@
-# Security Architecture & Sandbox Boundaries (Stage 1)
+# Security Architecture & Sandbox Boundaries (Stage 2)
 
 This document describes the security model, isolation mechanisms, and defense-in-depth layout of the **goboxd** sandbox service.
 
@@ -48,15 +48,29 @@ Every code execution runs in its own clean set of Linux namespaces:
 * **Read-Only Root (`--chroot /`)**: The host root filesystem is mounted as read-only. User code cannot modify compiler libraries, interpreters, or configuration files.
 * **Writable Workspaces (`--tmpfsmount /tmp`)**: A virtual `tmpfs` is mounted at `/tmp`. Code writing, compilation, and execution occur strictly inside memory-backed, ephemeral space that is discarded instantly when the sandbox exits.
 
-### Resource Limits (Cgroups)
+### Resource Limits (Cgroups & Rlimits)
 `nsjail` sets strict boundaries on CPU, memory, and process creation to prevent Denial of Service (DoS) attacks:
-* **Memory Limits (`--max_memory_m` / `--rl_as`)**: Limits memory consumption (e.g. 100 MiB for Python). Out-of-memory executions are instantly terminated.
-* **Process limits (`--max_pids` / `--rl_nproc`)**: Limits the number of concurrent processes or threads the sandbox can spawn, preventing fork bomb attacks.
 * **Time limits (`--time_limit`)**: Enforces execution timeouts (wall-time). If execution hangs or runs into infinite loops, `nsjail` kills the process.
+* **Process limits (`--max_pids` / `--rl_nproc`)**: Limits the number of concurrent processes or threads the sandbox can spawn, preventing fork bomb attacks.
+* **Memory Limits (`--rlimit_as` / `--max_memory_m`)**: Limits address space allocation. Out-of-memory executions are instantly terminated.
 
 ---
 
-## 3. Host-Level Defenses
+## 3. Virtual Machine Memory Defense
+
+Modern execution runtimes (like the Java JVM and Node.js V8 engine) attempt to reserve large virtual address spaces (often 1 GB or more) during startup for heap, GC card tables, and compressed class spaces. Under strict sandbox address limits, this results in immediate startup crashes (`OutOfMemoryError` or VM allocation failures).
+
+`goboxd` implements a **dual defense** for VM runtimes:
+1. **Virtual Space Overhead Allowances:** Raised memory allocation caps for JVM and Node.js sandboxes to 1 GB.
+2. **Runtime Memory Optimization Flags:** 
+   * **Java compiler/runner:** Configured to use the Serial Garbage Collector (`-XX:+UseSerialGC`) and level 1 tiered JIT compilation (`-XX:TieredStopAtLevel=1`), which minimizes thread stack and compilation table metadata overhead. We also restrict the compressed class space size (`-XX:CompressedClassSpaceSize=32m`) to reduce the default 1 GB address space reservation to 32 MB.
+   * **Node.js runner:** Configured to limit the V8 old space heap memory allocation (`--max-old-space-size=128`), keeping V8 from over-reserving memory blocks.
+
+This ensures that the runtimes boot successfully and execute with minimal physical memory (RSS) footprints, protecting the server against host memory exhaustion.
+
+---
+
+## 4. Host-Level Defenses
 
 ### Path Traversal Mitigation
 The HTTP validator package (`internal/validate`) blocks request filenames containing path separators (`/`, `\`) or dot prefixes (`.`, `..`). This ensures user source files are written strictly inside the unique workspace directory created by `os.MkdirTemp`, making directory traversal out of the workspace boundary impossible.
