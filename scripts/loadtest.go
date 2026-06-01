@@ -1,4 +1,4 @@
-// scripts/load_test.go
+// scripts/loadtest.go
 package main
 
 import (
@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"sort"
@@ -19,7 +20,20 @@ type RunRequest struct {
 	Source           string     `json:"source"`
 	SourceFilename   string     `json:"source_filename,omitempty"`
 	ArtifactFilename string     `json:"artifact_filename,omitempty"`
+	Build            *PhaseOpts `json:"build,omitempty"`
+	Run              *PhaseOpts `json:"run,omitempty"`
 	Tests            []TestCase `json:"tests"`
+}
+
+type PhaseOpts struct {
+	Limits *Limits  `json:"limits,omitempty"`
+	Flags  []string `json:"flags,omitempty"`
+}
+
+type Limits struct {
+	WallTimeS    int `json:"wall_time_s,omitempty"`
+	MemoryKB     int `json:"memory_kb,omitempty"`
+	MaxProcesses int `json:"max_processes,omitempty"`
 }
 
 type TestCase struct {
@@ -28,7 +42,8 @@ type TestCase struct {
 }
 
 type RunResponse struct {
-	Status string `json:"status"`
+	Status   string   `json:"status"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 type PayloadConfig struct {
@@ -83,33 +98,26 @@ func main() {
 	concurrency := flag.Int("c", 10, "Number of concurrent workers")
 	totalReqs := flag.Int("n", 100, "Total number of requests to run")
 	targetURL := flag.String("url", "http://localhost:8080/run", "Target endpoint URL")
-	lang := flag.String("lang", "py3", "Language payload to run (py3, c, cpp, java, bash, js, verilog)")
+	lang := flag.String("lang", "py3", "Language payload to run (py3, c, cpp, java, bash, js, verilog, mixed)")
 	flag.Parse()
+
+	rand.Seed(time.Now().UnixNano())
 
 	if *concurrency <= 0 || *totalReqs <= 0 {
 		fmt.Println("Concurrency and total requests must be positive numbers")
 		os.Exit(1)
 	}
 
-	config, ok := payloads[*lang]
-	if !ok {
-		fmt.Printf("Unsupported language: %s. Supported: py3, c, cpp, java, bash, js, verilog\n", *lang)
-		os.Exit(1)
-	}
+	var staticConfig PayloadConfig
+	isMixed := (*lang == "mixed")
 
-	payload := RunRequest{
-		Language:         config.Language,
-		Source:           config.Source,
-		SourceFilename:   config.SourceFilename,
-		ArtifactFilename: config.ArtifactFilename,
-		Tests: []TestCase{
-			{Stdin: "", ExpectedStdout: config.ExpectedStdout},
-		},
-	}
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		fmt.Printf("failed to marshal payload: %v\n", err)
-		os.Exit(1)
+	if !isMixed {
+		var ok bool
+		staticConfig, ok = payloads[*lang]
+		if !ok {
+			fmt.Printf("Unsupported language: %s. Supported: py3, c, cpp, java, bash, js, verilog, mixed\n", *lang)
+			os.Exit(1)
+		}
 	}
 
 	fmt.Printf("Starting load test against %s\n", *targetURL)
@@ -127,6 +135,7 @@ func main() {
 	var latencies []time.Duration
 	statusCounts := make(map[int]int)
 	runStatuses := make(map[string]int)
+	warningsReceived := 0
 
 	startTime := time.Now()
 
@@ -135,19 +144,82 @@ func main() {
 		go func() {
 			defer wg.Done()
 			client := &http.Client{
-				Timeout: 15 * time.Second,
+				Timeout: 20 * time.Second,
 			}
 
-			for range jobs {
+			for jobIdx := range jobs {
+				var reqPayload RunRequest
+				var selectedLang string
+
+				if isMixed {
+					keys := []string{"py3", "c", "cpp", "java", "bash", "js", "verilog"}
+					selectedLang = keys[rand.Intn(len(keys))]
+					config := payloads[selectedLang]
+
+					reqPayload = RunRequest{
+						Language:         config.Language,
+						Source:           config.Source,
+						SourceFilename:   config.SourceFilename,
+						ArtifactFilename: config.ArtifactFilename,
+						Tests: []TestCase{
+							{Stdin: "", ExpectedStdout: config.ExpectedStdout},
+						},
+					}
+
+					// Randomly inject overrides to test clamping
+					overrideType := rand.Intn(3) // 0: under-allocate, 1: over-allocate, 2: standard
+					if overrideType == 0 {
+						reqPayload.Run = &PhaseOpts{
+							Limits: &Limits{
+								MemoryKB:  256, // Under-allocated memory
+								WallTimeS: 0,   // Under-allocated wall time
+							},
+						}
+						// If Java/C/C++ compile exists, also under-allocate build phase
+						if selectedLang == "c" || selectedLang == "cpp" || selectedLang == "java" {
+							reqPayload.Build = &PhaseOpts{
+								Limits: &Limits{
+									MemoryKB: 512,
+								},
+							}
+						}
+					} else if overrideType == 1 {
+						reqPayload.Run = &PhaseOpts{
+							Limits: &Limits{
+								MemoryKB:  5242880, // 5 GB (over-allocated)
+								WallTimeS: 45,      // 45s (over-allocated)
+							},
+						}
+					}
+				} else {
+					selectedLang = *lang
+					reqPayload = RunRequest{
+						Language:         staticConfig.Language,
+						Source:           staticConfig.Source,
+						SourceFilename:   staticConfig.SourceFilename,
+						ArtifactFilename: staticConfig.ArtifactFilename,
+						Tests: []TestCase{
+							{Stdin: "", ExpectedStdout: staticConfig.ExpectedStdout},
+						},
+					}
+				}
+
+				payloadBytes, err := json.Marshal(reqPayload)
+				if err != nil {
+					continue
+				}
+
 				reqStart := time.Now()
 				resp, err := client.Post(*targetURL, "application/json", bytes.NewReader(payloadBytes))
 				reqDur := time.Since(reqStart)
 
 				var code int
 				var runStatus string
+				var warnings []string
 
 				if err != nil {
 					code = 999 // connection error
+					runStatus = "connection_failed"
 				} else {
 					code = resp.StatusCode
 					if resp.StatusCode == http.StatusOK {
@@ -155,6 +227,11 @@ func main() {
 						bodyBytes, _ := io.ReadAll(resp.Body)
 						_ = json.Unmarshal(bodyBytes, &runResp)
 						runStatus = runResp.Status
+						warnings = runResp.Warnings
+					} else {
+						// For non-200, try to parse error message
+						bodyBytes, _ := io.ReadAll(resp.Body)
+						runStatus = fmt.Sprintf("http_%d: %s", resp.StatusCode, string(bodyBytes))
 					}
 					resp.Body.Close()
 				}
@@ -165,7 +242,17 @@ func main() {
 				if runStatus != "" {
 					runStatuses[runStatus]++
 				}
+				if len(warnings) > 0 {
+					warningsReceived += len(warnings)
+				}
 				mu.Unlock()
+
+				warningLog := ""
+				if len(warnings) > 0 {
+					warningLog = fmt.Sprintf(" | Warnings: %v", warnings)
+				}
+				fmt.Printf("[%d] Lang: %s | Code: %d | Status: %s | Latency: %v%s\n",
+					jobIdx, selectedLang, code, runStatus, reqDur, warningLog)
 			}
 		}()
 	}
@@ -201,6 +288,7 @@ func main() {
 	fmt.Printf("p50 (median): %v\n", p50)
 	fmt.Printf("p95:          %v\n", p95)
 	fmt.Printf("p99:          %v\n", p99)
+	fmt.Printf("Warnings Rec: %d\n", warningsReceived)
 
 	fmt.Println("\n--- HTTP Status Counts ---")
 	for code, count := range statusCounts {
@@ -218,3 +306,4 @@ func main() {
 		}
 	}
 }
+
