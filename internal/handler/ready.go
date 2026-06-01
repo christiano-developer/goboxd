@@ -85,25 +85,30 @@ func (h *ReadyHandler) runChecks() {
 		var checkCmd string
 		var checkArgs []string
 
-		// Check the compiler binary if it has a build phase, else the runner binary
-		if lang.Build != nil {
+		if lang.SmokeCheckCmd != "" {
+			checkCmd = lang.SmokeCheckCmd
+		} else if lang.Build != nil {
 			checkCmd = lang.Build.Cmd
 		} else {
 			checkCmd = lang.Run.Cmd
 		}
 
-		// Tailor version arguments for typical runtimes
-		switch lang.ID {
-		case "py3", "c", "cpp", "bash":
-			checkArgs = []string{"--version"}
-		case "java":
-			checkArgs = []string{"-version"}
-		case "js":
-			checkArgs = []string{"--version"}
-		case "verilog":
-			checkArgs = []string{"-V"}
-		default:
-			checkArgs = []string{"--version"}
+		if len(lang.SmokeCheckArgs) > 0 {
+			checkArgs = lang.SmokeCheckArgs
+		} else {
+			// Tailor version arguments for typical runtimes
+			switch lang.ID {
+			case "py3", "c", "cpp", "bash":
+				checkArgs = []string{"--version"}
+			case "java":
+				checkArgs = []string{"-version"}
+			case "js":
+				checkArgs = []string{"--version"}
+			case "verilog":
+				checkArgs = []string{"-V"}
+			default:
+				checkArgs = []string{"--version"}
+			}
 		}
 
 		ver, err := getCmdVersion(checkCmd, checkArgs)

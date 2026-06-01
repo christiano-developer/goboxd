@@ -7,6 +7,7 @@ package languages
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -34,6 +35,9 @@ func Load(path string) (*Registry, error) {
 
 	m := make(map[string]Language, len(file.Languages))
 	for _, lang := range file.Languages {
+		if err := lang.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid language config: %w", err)
+		}
 		m[lang.ID] = lang
 	}
 
@@ -56,4 +60,68 @@ func (r *Registry) All() []Language {
 		out = append(out, l)
 	}
 	return out
+}
+
+func (l Language) Validate() error {
+	if l.ID == "" {
+		return fmt.Errorf("language ID is required")
+	}
+	if l.Name == "" {
+		return fmt.Errorf("language name is required for ID %q", l.ID)
+	}
+	if l.Run.Cmd == "" {
+		return fmt.Errorf("run command is required for ID %q", l.ID)
+	}
+	if l.Run.Limits.WallTimeS <= 0 {
+		return fmt.Errorf("run limits.wall_time_s must be positive for ID %q", l.ID)
+	}
+	if l.Run.Limits.MemoryKB <= 0 {
+		return fmt.Errorf("run limits.memory_kb must be positive for ID %q", l.ID)
+	}
+	if l.Run.Limits.MaxProcesses <= 0 {
+		return fmt.Errorf("run limits.max_processes must be positive for ID %q", l.ID)
+	}
+
+	if l.Build != nil {
+		if l.Build.Cmd == "" {
+			return fmt.Errorf("build command is required for ID %q", l.ID)
+		}
+		if l.Build.Limits.WallTimeS <= 0 {
+			return fmt.Errorf("build limits.wall_time_s must be positive for ID %q", l.ID)
+		}
+		if l.Build.Limits.MemoryKB <= 0 {
+			return fmt.Errorf("build limits.memory_kb must be positive for ID %q", l.ID)
+		}
+		if l.Build.Limits.MaxProcesses <= 0 {
+			return fmt.Errorf("build limits.max_processes must be positive for ID %q", l.ID)
+		}
+	}
+
+	if l.SourceFilename != "" {
+		if err := validateFilename(l.SourceFilename); err != nil {
+			return fmt.Errorf("invalid source_filename for ID %q: %w", l.ID, err)
+		}
+	}
+	if l.Artifact != "" {
+		if err := validateFilename(l.Artifact); err != nil {
+			return fmt.Errorf("invalid artifact for ID %q: %w", l.ID, err)
+		}
+	}
+	return nil
+}
+
+func validateFilename(s string) error {
+	if s == "" {
+		return fmt.Errorf("filename must not be empty")
+	}
+	if strings.ContainsAny(s, `/\`) {
+		return fmt.Errorf("filename must be a single path component")
+	}
+	if strings.HasPrefix(s, ".") {
+		return fmt.Errorf("filename must not start with a dot")
+	}
+	if s == ".." {
+		return fmt.Errorf("filename must not be ..")
+	}
+	return nil
 }

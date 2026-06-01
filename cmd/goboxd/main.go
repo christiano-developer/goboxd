@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -37,9 +39,34 @@ func main() {
 	}
 	slog.Info("language registry loaded")
 
+	// Determine concurrency limit (default to CPU cores)
+	concurrencyLimit := runtime.NumCPU()
+	if envVal := os.Getenv("CONCURRENCY_LIMIT"); envVal != "" {
+		if val, err := strconv.Atoi(envVal); err == nil && val > 0 {
+			concurrencyLimit = val
+		}
+	} else if envVal := os.Getenv("MAX_CONCURRENT_JOBS"); envVal != "" {
+		if val, err := strconv.Atoi(envVal); err == nil && val > 0 {
+			concurrencyLimit = val
+		}
+	}
+
+	// Determine max queue size (default to 500)
+	maxQueueSize := 500
+	if envVal := os.Getenv("MAX_QUEUE_SIZE"); envVal != "" {
+		if val, err := strconv.Atoi(envVal); err == nil && val >= 0 {
+			maxQueueSize = val
+		}
+	}
+
+	slog.Info("initializing concurrency pool",
+		"concurrency_limit", concurrencyLimit,
+		"max_queue_size", maxQueueSize,
+	)
+
 	// Instantiate stats and pool
 	stats := &handler.ServerStats{}
-	pool := worker.NewConcurrencyPool(15, 500)
+	pool := worker.NewConcurrencyPool(concurrencyLimit, maxQueueSize)
 
 	mux := http.NewServeMux()
 

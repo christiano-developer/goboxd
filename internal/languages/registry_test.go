@@ -67,3 +67,67 @@ func TestLoadMissingFile(t *testing.T) {
 		t.Error("expected error for missing file")
 	}
 }
+
+func TestValidationErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "missing ID",
+			yaml: `
+languages:
+  - name: Python 3
+    run:
+      cmd: /usr/bin/python3
+      limits: { wall_time_s: 5, memory_kb: 100, max_processes: 10 }
+`,
+		},
+		{
+			name: "missing command",
+			yaml: `
+languages:
+  - id: py3
+    name: Python 3
+    run:
+      limits: { wall_time_s: 5, memory_kb: 100, max_processes: 10 }
+`,
+		},
+		{
+			name: "negative limits",
+			yaml: `
+languages:
+  - id: py3
+    name: Python 3
+    run:
+      cmd: /usr/bin/python3
+      limits: { wall_time_s: -1, memory_kb: 100, max_processes: 10 }
+`,
+		},
+		{
+			name: "path traversal in filename",
+			yaml: `
+languages:
+  - id: py3
+    name: Python 3
+    source_filename: ../solution.py
+    run:
+      cmd: /usr/bin/python3
+      limits: { wall_time_s: 5, memory_kb: 100, max_processes: 10 }
+`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			path := filepath.Join(tmp, "invalid.yaml")
+			if err := os.WriteFile(path, []byte(tc.yaml), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := languages.Load(path); err == nil {
+				t.Errorf("expected validation error for case %q", tc.name)
+			}
+		})
+	}
+}

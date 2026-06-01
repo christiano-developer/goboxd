@@ -12,6 +12,8 @@ type Language struct {
 	ArtifactFilenameStrategy string       `yaml:"artifact_filename_strategy,omitempty" json:"artifact_filename_strategy,omitempty"`
 	Build                    *PhaseConfig `yaml:"build,omitempty" json:"build,omitempty"`
 	Run                      PhaseConfig  `yaml:"run" json:"run"`
+	SmokeCheckCmd            string       `yaml:"smoke_check_cmd,omitempty" json:"smoke_check_cmd,omitempty"`
+	SmokeCheckArgs           []string     `yaml:"smoke_check_args,omitempty" json:"smoke_check_args,omitempty"`
 }
 
 type PhaseConfig struct {

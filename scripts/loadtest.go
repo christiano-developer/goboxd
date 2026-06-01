@@ -101,8 +101,6 @@ func main() {
 	lang := flag.String("lang", "py3", "Language payload to run (py3, c, cpp, java, bash, js, verilog, mixed)")
 	flag.Parse()
 
-	rand.Seed(time.Now().UnixNano())
-
 	if *concurrency <= 0 || *totalReqs <= 0 {
 		fmt.Println("Concurrency and total requests must be positive numbers")
 		os.Exit(1)
