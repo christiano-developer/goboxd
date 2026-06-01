@@ -1,7 +1,6 @@
 // internal/languages/config.go
 // Christiano Fernadnes
 // 31 May 26
-// Model for the responses
 package languages
 
 type Language struct {

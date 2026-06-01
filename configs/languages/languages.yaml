@@ -43,3 +43,102 @@ languages:
         wall_time_s: 10
         memory_kb: 128000
         max_processes: 32
+
+  - id: cpp
+    name: C++
+    source_filename: solution.cpp
+    artifact: solution
+    build:
+      cmd: /usr/bin/g++
+      args: ["{{source}}", "-o", "{{artifact}}", "-std=c++17"]
+      limits:
+        wall_time_s: 15
+        memory_kb: 1048576
+        max_processes: 100
+      flag_allowlist:
+        - "-O0"
+        - "-O1"
+        - "-O2"
+        - "-O3"
+        - "-Wall"
+        - "-Wextra"
+        - "-std=c++17"
+        - "-std=c++20"
+    run:
+      cmd: "./{{artifact}}"
+      limits:
+        wall_time_s: 10
+        memory_kb: 128000
+        max_processes: 32
+
+  - id: java
+    name: Java
+    source_filename_strategy: from_request
+    artifact_filename_strategy: from_request
+    build:
+      cmd: /usr/bin/javac
+      args:
+        - "-J-XX:+UseSerialGC"
+        - "-J-XX:TieredStopAtLevel=1"
+        - "-J-XX:CompressedClassSpaceSize=32m"
+        - "-J-Xms128m"
+        - "-J-Xmx256m"
+        - "{{source}}"
+      limits:
+        wall_time_s: 15
+        memory_kb: 1048576
+        max_processes: 100
+    run:
+      cmd: /usr/bin/java
+      args:
+        - "-XX:+UseSerialGC"
+        - "-XX:TieredStopAtLevel=1"
+        - "-XX:CompressedClassSpaceSize=32m"
+        - "-Xms64m"
+        - "-Xmx128m"
+        - "{{artifact}}"
+      limits:
+        wall_time_s: 10
+        memory_kb: 1048576
+        max_processes: 100
+
+  - id: bash
+    name: Bash
+    source_filename: solution.sh
+    run:
+      cmd: /bin/bash
+      args: ["{{source}}"]
+      limits:
+        wall_time_s: 5
+        memory_kb: 51200
+        max_processes: 32
+
+  - id: js
+    name: JavaScript (Node)
+    source_filename: solution.js
+    run:
+      cmd: /usr/bin/node
+      args: ["--max-old-space-size=128", "{{source}}"]
+      limits:
+        wall_time_s: 9
+        memory_kb: 1048576
+        max_processes: 64
+
+  - id: verilog
+    name: Verilog
+    source_filename: solution.v
+    artifact: solution.vvp
+    build:
+      cmd: /usr/bin/iverilog
+      args: ["-o", "{{artifact}}", "{{source}}"]
+      limits:
+        wall_time_s: 10
+        memory_kb: 262144
+        max_processes: 32
+    run:
+      cmd: /usr/bin/vvp
+      args: ["{{artifact}}"]
+      limits:
+        wall_time_s: 5
+        memory_kb: 128000
+        max_processes: 32

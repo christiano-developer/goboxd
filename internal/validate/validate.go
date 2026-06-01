@@ -1,7 +1,7 @@
 // internal/validate/validate.go
 // Christiano Fernadnes
 // 31 May 26
-// Model for the responses
+
 package validate
 
 import (

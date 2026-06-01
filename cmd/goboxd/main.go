@@ -24,14 +24,21 @@ func main() {
 	}
 	slog.Info("language registry loaded")
 	mux := http.NewServeMux()
+	// Initialize stats tracking
+	stats := &handler.ServerStats{}
+
 	// GET /healthz
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
+	// GET /readyz
+	mux.Handle("GET /readyz", handler.NewReadyHandler(registry))
+	// GET /info
+	mux.Handle("GET /info", handler.NewInfoHandler(registry, stats))
 	// POST /run
-	mux.Handle("POST /run", &handler.RunHandler{Registry: registry})
+	mux.Handle("POST /run", &handler.RunHandler{Registry: registry, Stats: stats})
 	addr := ":8080"
 	slog.Info("server starting", "addr", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {

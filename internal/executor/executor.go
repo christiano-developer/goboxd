@@ -1,4 +1,6 @@
 // internal/executor/executor.go
+// Christiano Fernandes
+// 31 May 26
 package executor
 
 import (
@@ -47,8 +49,21 @@ func Run(req *model.RunRequest, lang languages.Language) (*model.RunResponse, er
 
 	// --- Build phase (compiled languages only) ---
 	if lang.Build != nil {
-		artifactPath := filepath.Join(workDir, lang.Artifact)
-		buildCmd := resolvePlaceholders(lang.Build.Args, srcPath, artifactPath)
+		artifactName := lang.Artifact
+		if lang.ArtifactFilenameStrategy == "from_request" || artifactName == "" {
+			artifactName = req.ArtifactFilename
+		}
+		artifactPath := ""
+		if artifactName != "" {
+			artifactPath = filepath.Join(workDir, artifactName)
+		}
+
+		buildFlags := []string{}
+		if req.Build != nil && len(req.Build.Flags) > 0 {
+			buildFlags = req.Build.Flags
+		}
+
+		buildCmd := resolvePlaceholders(lang.Build.Args, srcPath, artifactPath, buildFlags)
 
 		limits := lang.Build.Limits
 		if req.Build != nil && req.Build.Limits != nil {
@@ -94,11 +109,27 @@ func Run(req *model.RunRequest, lang languages.Language) (*model.RunResponse, er
 		runLimits = mergeLimits(runLimits, *req.Run.Limits)
 	}
 
-	artifactPath := filepath.Join(workDir, lang.Artifact)
-	runCmd := resolvePlaceholders(lang.Run.Args, srcPath, artifactPath)
+	artifactName := lang.Artifact
+	if lang.ArtifactFilenameStrategy == "from_request" || artifactName == "" {
+		artifactName = req.ArtifactFilename
+	}
+	artifactPath := ""
+	if artifactName != "" {
+		artifactPath = filepath.Join(workDir, artifactName)
+	}
+
+	runFlags := []string{}
+	if req.Run != nil && len(req.Run.Flags) > 0 {
+		runFlags = req.Run.Flags
+	}
+
+	// For execution arguments, we pass the relative artifactName (e.g. for Java classname: java Main)
+	runCmd := resolvePlaceholders(lang.Run.Args, srcPath, artifactName, runFlags)
 	fullCmd := append([]string{lang.Run.Cmd}, runCmd...)
-	// Resolve {{artifact}} in the cmd itself (e.g. "./{{artifact}}")
-	fullCmd[0] = strings.ReplaceAll(fullCmd[0], "{{artifact}}", artifactPath)
+	// Resolve {{artifact}} in the command path itself (e.g. "./{{artifact}}" -> "/tmp/goboxd-xxx/solution")
+	if artifactPath != "" {
+		fullCmd[0] = strings.ReplaceAll(fullCmd[0], "{{artifact}}", artifactPath)
+	}
 	if strings.HasPrefix(fullCmd[0], "./") {
 		cleaned := strings.TrimPrefix(fullCmd[0], "./")
 		if filepath.IsAbs(cleaned) {
@@ -123,10 +154,11 @@ func Run(req *model.RunRequest, lang languages.Language) (*model.RunResponse, er
 		status := classifyResult(stdout, tc.ExpectedStdout, exitErr, runLimits.WallTimeS, durationMs)
 
 		resp.Tests[i] = model.TestResult{
-			Status:     status,
-			Stdout:     stdout,
-			Stderr:     stderr,
-			DurationMs: durationMs,
+			Status:       status,
+			Stdout:       stdout,
+			Stderr:       stderr,
+			DurationMs:   durationMs,
+			MemoryPeakKB: 0,
 		}
 
 		if firstNonAccepted == "" && status != "accepted" {
@@ -185,13 +217,17 @@ func classifyResult(actual, expected string, exitErr error, wallTimeSecs int, du
 	return "wrong_output"
 }
 
-// resolvePlaceholders replaces {{source}} and {{artifact}} in arg list.
-func resolvePlaceholders(args []string, srcPath, artifactPath string) []string {
-	out := make([]string, len(args))
-	for i, a := range args {
-		a = strings.ReplaceAll(a, "{{source}}", srcPath)
-		a = strings.ReplaceAll(a, "{{artifact}}", artifactPath)
-		out[i] = a
+// resolvePlaceholders replaces {{source}}, {{artifact}}, and {{flags}} placeholders.
+func resolvePlaceholders(args []string, srcPath, artifactParam string, flags []string) []string {
+	var out []string
+	for _, a := range args {
+		if a == "{{flags}}" {
+			out = append(out, flags...)
+		} else {
+			a = strings.ReplaceAll(a, "{{source}}", srcPath)
+			a = strings.ReplaceAll(a, "{{artifact}}", artifactParam)
+			out = append(out, a)
+		}
 	}
 	return out
 }

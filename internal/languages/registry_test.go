@@ -1,4 +1,6 @@
 // internal/languages/registry_test.go
+// Christiano Fernandes
+// 31 May 26
 package languages_test
 
 import (

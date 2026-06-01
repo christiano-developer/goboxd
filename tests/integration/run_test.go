@@ -31,7 +31,10 @@ func setupServer(t *testing.T) *httptest.Server {
 		t.Fatalf("load registry: %v", err)
 	}
 	mux := http.NewServeMux()
-	mux.Handle("POST /run", &handler.RunHandler{Registry: reg})
+	stats := &handler.ServerStats{}
+	mux.Handle("GET /readyz", handler.NewReadyHandler(reg))
+	mux.Handle("GET /info", handler.NewInfoHandler(reg, stats))
+	mux.Handle("POST /run", &handler.RunHandler{Registry: reg, Stats: stats})
 	return httptest.NewServer(mux)
 }
 
@@ -157,5 +160,156 @@ func TestUnknownLanguage(t *testing.T) {
 	resp, _ := http.Post(srv.URL+"/run", "application/json", bytes.NewReader(body))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestReadyzEndpoint(t *testing.T) {
+	srv := setupServer(t)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/readyz")
+	if err != nil {
+		t.Fatalf("GET /readyz failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Inside tests (host has no nsjail unless inside Docker), readyz might be degraded or OK.
+	// But it must return a valid JSON response with status.
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("expected 200 or 503, got %d", resp.StatusCode)
+	}
+
+	var data map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		t.Fatalf("decode readyz: %v", err)
+	}
+	if _, ok := data["status"]; !ok {
+		t.Error("missing status field in readyz response")
+	}
+}
+
+func TestInfoEndpoint(t *testing.T) {
+	srv := setupServer(t)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/info")
+	if err != nil {
+		t.Fatalf("GET /info failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var data map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		t.Fatalf("decode info: %v", err)
+	}
+	if _, ok := data["nsjail_version"]; !ok {
+		t.Error("missing nsjail_version in info response")
+	}
+	if _, ok := data["languages"]; !ok {
+		t.Error("missing languages list in info response")
+	}
+}
+
+func TestCppAccepted(t *testing.T) {
+	srv := setupServer(t)
+	defer srv.Close()
+
+	result := postRun(t, srv, model.RunRequest{
+		Language: "cpp",
+		Source: `#include <iostream>
+int main() {
+    std::cout << "hello C++" << std::endl;
+    return 0;
+}`,
+		Tests: []model.TestCase{
+			{Stdin: "", ExpectedStdout: "hello C++\n"},
+		},
+	})
+
+	if result.Status != "accepted" {
+		t.Errorf("expected accepted, got %q (build error: %v)", result.Status, result.Build)
+	}
+}
+
+func TestJavaAccepted(t *testing.T) {
+	srv := setupServer(t)
+	defer srv.Close()
+
+	result := postRun(t, srv, model.RunRequest{
+		Language:         "java",
+		Source: `public class Main {
+    public static void main(String[] args) {
+        System.out.println("hello Java");
+    }
+}`,
+		SourceFilename:   "Main.java",
+		ArtifactFilename: "Main",
+		Tests: []model.TestCase{
+			{Stdin: "", ExpectedStdout: "hello Java\n"},
+		},
+	})
+
+	if result.Status != "accepted" {
+		t.Errorf("expected accepted, got %q (build error: %v)", result.Status, result.Build)
+	}
+}
+
+func TestBashAccepted(t *testing.T) {
+	srv := setupServer(t)
+	defer srv.Close()
+
+	result := postRun(t, srv, model.RunRequest{
+		Language: "bash",
+		Source:   "echo 'hello Bash'",
+		Tests: []model.TestCase{
+			{Stdin: "", ExpectedStdout: "hello Bash\n"},
+		},
+	})
+
+	if result.Status != "accepted" {
+		t.Errorf("expected accepted, got %q", result.Status)
+	}
+}
+
+func TestJsAccepted(t *testing.T) {
+	srv := setupServer(t)
+	defer srv.Close()
+
+	result := postRun(t, srv, model.RunRequest{
+		Language: "js",
+		Source:   "console.log('hello Node');",
+		Tests: []model.TestCase{
+			{Stdin: "", ExpectedStdout: "hello Node\n"},
+		},
+	})
+
+	if result.Status != "accepted" {
+		t.Errorf("expected accepted, got %q", result.Status)
+	}
+}
+
+func TestVerilogAccepted(t *testing.T) {
+	srv := setupServer(t)
+	defer srv.Close()
+
+	result := postRun(t, srv, model.RunRequest{
+		Language: "verilog",
+		Source: `module Main;
+    initial begin
+        $display("hello Verilog");
+        $finish;
+    end
+endmodule`,
+		Tests: []model.TestCase{
+			{Stdin: "", ExpectedStdout: "hello Verilog\n"},
+		},
+	})
+
+	if result.Status != "accepted" {
+		t.Errorf("expected accepted, got %q (build error: %v)", result.Status, result.Build)
 	}
 }

@@ -1,9 +1,12 @@
 // internal/handler/run.go
+// Christiano Fernandes
+// 31 May 26
 package handler
 
 import (
 	"encoding/json"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/thesouldev/goboxd/internal/executor"
 	"github.com/thesouldev/goboxd/internal/languages"
@@ -14,6 +17,7 @@ import (
 // RunHandler handles POST /run.
 type RunHandler struct {
 	Registry *languages.Registry
+	Stats    *ServerStats
 }
 
 func (h *RunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +82,10 @@ func (h *RunHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
+	}
+
+	if h.Stats != nil {
+		atomic.AddUint64(&h.Stats.TotalRuns, 1)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
