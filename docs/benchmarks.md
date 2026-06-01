@@ -5,42 +5,34 @@ This document records the performance benchmarks of the **goboxd** service under
 ## Test Environment
 *   **Host OS**: macOS (Darwin 25.4.0)
 *   **Hardware**: Apple M2 MacBook Air (8 CPU cores, 8 GB RAM)
-*   **Virtualization**: Docker Desktop (running Linux container environment, privileged mode)
+*   **Virtualization**: Docker Desktop (running Linux container environment, unprivileged mode)
 *   **Target Payload**: Trivial Python 3 execution (`py3`, "Hello World" print)
 
 ---
 
-## Benchmark Results
+## Baseline Benchmark Results (Python 3)
 
 The following table summarizes the requests/sec throughput and latency percentiles ($p_{50}$, $p_{95}$, $p_{99}$) for `POST /run` under different concurrent client configurations.
 
 | Concurrent Clients | Total Requests | Throughput (req/sec) | Average Latency | $p_{50}$ (Median) | $p_{95}$ | $p_{99}$ |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1** | 20 | 66.53 | 14.99ms | 7.56ms | 139.08ms | 139.08ms |
-| **10** | 100 | 373.06 | 26.26ms | 18.55ms | 93.23ms | 104.17ms |
-| **50** | 500 | 528.36 | 91.09ms | 86.92ms | 123.44ms | 168.32ms |
-| **100** | 1000 | 549.10 | 174.86ms | 166.48ms | 225.51ms | 310.82ms |
+| **1** | 100 | 94.61 | 10.52ms | 8.42ms | 15.76ms | 144.36ms |
+| **10** | 100 | 237.81 | 40.90ms | 33.42ms | 106.24ms | 132.43ms |
+| **50** | 500 | 361.35 | 132.38ms | 122.28ms | 203.54ms | 263.01ms |
+| **100** | 1000 | 407.66 | 234.62ms | 231.64ms | 276.41ms | 345.31ms |
 
 ---
 
-## Load Shedding Verification
+## Mixed Payload and Limit Clamping Verification
 
-Under extreme overload (**600 concurrent clients** sending 1200 total requests), the service successfully demonstrated active queue limitation and immediate load shedding:
-*   **Total Capacity**: 515 requests (15 active workers + 500 queued slots).
-*   **Processed successfully (HTTP 200)**: 565 requests.
-*   **Rejected immediately (HTTP 503 Service Unavailable)**: 635 requests.
-*   **Dynamic Wait Estimation**: Rejected requests successfully returned the `Retry-After` header indicating estimated wait time.
-
----
-
-## Other Supported Languages Verification
-
-Verification tests were also run for C, Java, and JavaScript (Node.js) payloads to verify that the sandbox compilation pipelines and memory caps function correctly:
-
-*   **C (`c`)**: Compiles and executes a simple print under `nsjail`.
-    *   2 concurrent clients, 10 requests: **28.24 req/sec**, average latency **70.66ms** ($p_{50}$ **25.17ms**).
-*   **Java (`java`)**: Compiles with `javac` and launches JVM under `nsjail` (validated with 1 GB memory limit floor).
-    *   2 concurrent clients, 6 requests: **6.24 req/sec**, average latency **315.91ms** ($p_{50}$ **285.78ms**).
-*   **JavaScript (`js`)**: Evaluates Node.js execution under `nsjail` (validated with 1 GB memory limit floor).
-    *   2 concurrent clients, 10 requests: **21.97 req/sec**, average latency **91.01ms** ($p_{50}$ **57.26ms**).
-
+To verify that the queue scheduler, priority routing, and resource limit clamping function correctly under realistic workloads, we ran a mixed payload benchmark:
+*   **Configuration:** 10 concurrent clients sending 100 total requests.
+*   **Workload:** Randomized mix of all 7 supported languages (Python, C, C++, Java, Bash, JavaScript, and Verilog) with randomized over-allocated and under-allocated resource limits.
+*   **Outcome:** 100% of requests processed successfully (HTTP 200).
+*   **Throughput:** **45.33 requests/sec**.
+*   **Latency Profile:**
+    *   **Average:** 203.95ms
+    *   **p50 (Median):** 105.53ms
+    *   **p95:** 792.55ms
+    *   **p99:** 937.16ms
+*   **Clamping Assertion:** **110 warnings** were returned in the response payloads, confirming that both under-allocation floors (e.g. JVM/Node 1 GB minimums) and load-adaptive upper caps were correctly computed and active.
