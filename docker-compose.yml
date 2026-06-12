@@ -7,6 +7,13 @@ services:
     container_name: goboxd
     ports:
       - "8080:8080"
+    # Hard caps: 2 vCPUs of CPU time and 2 GB RAM (honored by `docker compose up`).
+    cpus: 2.0
+    mem_limit: 2g
+    # Pin job concurrency to the CPU cap. The app otherwise defaults to
+    # runtime.NumCPU(), which reads the HOST core count, not the cgroup limit.
+    environment:
+      - CONCURRENCY_LIMIT=16
     cap_add:
       - SYS_ADMIN
     security_opt:

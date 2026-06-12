@@ -7,10 +7,11 @@
 #   - goboxd running in its container, capped at 2 vCPU / 2 GB
 #     (docker compose up -d goboxd; see docker-compose.yml)
 #   - Go toolchain (the generator runs on the host)
-#   - python3 + matplotlib (for the graphs)
+#   - a python with matplotlib for the graphs (point PYTHON at it)
 #
-# Produces, in docs/loadtest/:
-#   results.csv, breaking-point.png, latency.png
+# The generator auto-labels the run from the live CONCURRENCY_LIMIT (/info),
+# writes a timestamped CSV + its plots to docs/loadtest/runs/, and refreshes the
+# canonical docs/loadtest/results.csv + breaking-point.png + latency.png.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."   # repo root
@@ -22,16 +23,14 @@ DURATION="${DURATION:-30s}"
 TIMEOUT="${TIMEOUT:-10s}"
 STOP_AFTER_FAIL="${STOP_AFTER_FAIL:-3}"
 DRAIN_MAX="${DRAIN_MAX:-60s}"
+PYTHON="${PYTHON:-/tmp/plotenv/bin/python}"   # a python that has matplotlib
 
-echo "==> Driving load (open-loop, ${DURATION}/step, ${TIMEOUT} timeout)"
+echo "==> Driving load (open-loop, ${DURATION}/step, ${TIMEOUT} timeout) + plotting"
 go run ./scripts/memhog \
   -url "$URL" -info "$INFO" \
   -source docs/loadtest/MemoryHog.java \
-  -out docs/loadtest/results.csv \
   -rates "$RATES" -duration "$DURATION" -timeout "$TIMEOUT" \
-  -stop-after-fail "$STOP_AFTER_FAIL" -drain-max "$DRAIN_MAX"
+  -stop-after-fail "$STOP_AFTER_FAIL" -drain-max "$DRAIN_MAX" \
+  -python "$PYTHON"
 
-echo "==> Plotting"
-python3 docs/loadtest/plot.py docs/loadtest/results.csv
-
-echo "==> Done. See docs/loadtest/results.csv, breaking-point.png, latency.png"
+echo "==> Done. See docs/loadtest/runs/ (this run) and docs/loadtest/results.csv (latest)"

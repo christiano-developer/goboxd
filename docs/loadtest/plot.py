@@ -83,6 +83,26 @@ def main():
     plt.grid(True, alpha=0.3)
     plt.savefig(lat_png, dpi=150, bbox_inches="tight")
 
+    # ---- wasted-work.png: delivered (goodput) vs wasted server work ----
+    # Only plotted if the CSV carries the extra accounting columns.
+    if rows and "server_completed" in rows[0]:
+        plt.figure(figsize=(8, 5))
+        plt.plot(rps, [float(r["success"]) for r in rows], marker="o",
+                 label="delivered (within SLA)", color="#27ae60")
+        plt.plot(rps, [float(r["wasted"]) for r in rows], marker="o",
+                 label="wasted (finished after client gave up)", color="#c0392b")
+        plt.plot(rps, [float(r["server_completed"]) for r in rows], marker="o",
+                 label="server total completed", color="#2c3e50", linestyle="--")
+        if bp is not None:
+            plt.axvline(bp, color="#7f8c8d", linestyle=":", linewidth=1.2)
+        plt.xlabel("Offered RPS")
+        plt.ylabel("Jobs per step")
+        plt.title(f"Delivered vs wasted server work — MemoryHog @ {title_suffix}")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig(waste_png, dpi=150, bbox_inches="tight")
+        print(f"wrote {waste_png}")
+
     print(f"breaking point: {bp} rps")
     print(f"wrote {bp_png} and {lat_png}")
 

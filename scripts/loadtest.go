@@ -93,11 +93,11 @@ var payloads = map[string]PayloadConfig{
 		ExpectedStdout: "hello\n",
 	},
 	"kotlin": {
-		Language:         "kotlin",
-		Source:           "fun main() { println(\"hello\") }",
-		SourceFilename:   "solution.kt",
-		ArtifactFilename: "solution.jar",
-		ExpectedStdout:   "hello\n",
+		Language: "kotlin",
+		Source:   "fun main() { println(\"hello\") }",
+		// Filenames are managed by the language config (fixed source_filename:
+		// solution.kt → main class SolutionKt). Do not override them here.
+		ExpectedStdout: "hello\n",
 	},
 	"lisp": {
 		Language:       "lisp",

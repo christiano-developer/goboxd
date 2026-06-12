@@ -29,6 +29,7 @@ Extended documentation is located in the `docs/` directory:
 *   **[System Architecture](docs/architecture.md)** — Concurrency scheduling, priority queueing, and lifecycle flows.
 *   **[Language Registry](docs/languages.md)** — Configuration schema for registering compilers and runtimes.
 *   **[Security Model](docs/security.md)** — Explaining namespace isolation, UID mapping, and resource limits.
+*   **[Load Testing](docs/loadtest/runs/README.md)** — MemoryHog breaking-point benchmark: methodology, how to run it, and the per-run results/plots (best config: `CONCURRENCY_LIMIT=8`, breaking point 5 rps @ 2 vCPU / 2 GB).
 
 ---
 

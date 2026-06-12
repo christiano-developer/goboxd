@@ -95,11 +95,16 @@ languages:
         - "-XX:TieredStopAtLevel=1"
         - "-XX:CompressedClassSpaceSize=32m"
         - "-Xms64m"
-        - "-Xmx128m"
+        # 384m heap: headroom for java workloads that hold ~150 MB on the heap
+        # (the 128m default OOMs them) while staying well under the container's
+        # 2 GB cap even at concurrency 2.
+        - "-Xmx384m"
         - "{{artifact}}"
       limits:
         wall_time_s: 10
-        memory_kb: 1048576
+        # 1.5 GB rlimit_as so the JVM's virtual reservation (heap + metaspace +
+        # thread stacks) fits at -Xmx384m. Address space, not RSS.
+        memory_kb: 1572864
         max_processes: 100
 
   - id: bash
