@@ -124,6 +124,76 @@ languages:
         memory_kb: 1048576
         max_processes: 64
 
+  - id: php
+    name: PHP
+    source_filename: solution.php
+    run:
+      cmd: /usr/bin/php
+      args: ["{{source}}"]
+      limits:
+        wall_time_s: 9
+        memory_kb: 102400
+        max_processes: 64
+
+  - id: kotlin
+    name: Kotlin
+    source_filename: solution.kt
+    artifact: solution.jar
+    build:
+      cmd: /usr/local/bin/kotlinc
+      # -J flags bound the compiler JVM's virtual reservation so it fits under
+      # nsjail's rlimit_as (serial GC + small compressed class space), mirroring javac.
+      # NOTE: no -include-runtime — that bundles kotlin-stdlib (~5 MB) into the jar
+      # and trips nsjail's 1 MB RLIMIT_FSIZE. We emit a thin jar (~1 KB) and supply
+      # the already-installed stdlib on the classpath at run time instead.
+      args:
+        - "-J-XX:+UseSerialGC"
+        - "-J-XX:TieredStopAtLevel=1"
+        - "-J-XX:CompressedClassSpaceSize=64m"
+        - "-J-Xms128m"
+        - "-J-Xmx512m"
+        - "{{source}}"
+        - "-d"
+        - "{{artifact}}"
+      limits:
+        wall_time_s: 60
+        memory_kb: 2097152
+        max_processes: 256
+    run:
+      cmd: /usr/bin/java
+      # Thin jar on the classpath alongside the host-installed kotlin-stdlib (read-only,
+      # so RLIMIT_FSIZE never applies to it). Main class is <SourceBasename>Kt:
+      # solution.kt compiles to SolutionKt.
+      args:
+        - "-XX:+UseSerialGC"
+        - "-XX:TieredStopAtLevel=1"
+        - "-XX:CompressedClassSpaceSize=32m"
+        - "-Xms64m"
+        - "-Xmx256m"
+        - "-cp"
+        - "{{artifact}}:/opt/kotlinc/lib/kotlin-stdlib.jar"
+        - "SolutionKt"
+      limits:
+        wall_time_s: 10
+        memory_kb: 1048576
+        max_processes: 100
+    smoke_check_cmd: /usr/local/bin/kotlinc
+    smoke_check_args: ["-version"]
+
+  - id: lisp
+    name: Common Lisp (SBCL)
+    source_filename: solution.lisp
+    run:
+      cmd: /usr/bin/sbcl
+      # --dynamic-space-size bounds SBCL's GC heap reservation so it fits under rlimit_as.
+      args: ["--dynamic-space-size", "256", "--script", "{{source}}"]
+      limits:
+        wall_time_s: 10
+        memory_kb: 1048576
+        max_processes: 32
+    smoke_check_cmd: /usr/bin/sbcl
+    smoke_check_args: ["--version"]
+
   - id: verilog
     name: Verilog
     source_filename: solution.v

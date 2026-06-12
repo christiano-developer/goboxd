@@ -33,10 +33,20 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/goboxd ./cmd/gobox
 
 # ---- Runtime image ----
 FROM debian:${DEBIAN_VERSION}-slim AS runtime
+ARG KOTLIN_VERSION=2.1.10
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates libnl-route-3-200 libprotobuf32 \
-        python3 gcc libc6-dev \
+        python3 gcc libc6-dev php sbcl \
         g++ default-jdk nodejs iverilog uidmap \
+        curl unzip \
+    # Install the Kotlin command-line compiler (depends on the JDK above)
+    && curl -fsSL -o /tmp/kotlin.zip \
+        "https://github.com/JetBrains/kotlin/releases/download/v${KOTLIN_VERSION}/kotlin-compiler-${KOTLIN_VERSION}.zip" \
+    && unzip -q /tmp/kotlin.zip -d /opt \
+    && ln -sf /opt/kotlinc/bin/kotlinc /usr/local/bin/kotlinc \
+    && ln -sf /opt/kotlinc/bin/kotlin  /usr/local/bin/kotlin \
+    && rm -f /tmp/kotlin.zip \
+    && apt-get purge -y --auto-remove unzip \
     && rm -rf /var/lib/apt/lists/* \
     && echo "root:100000:1000000000" > /etc/subuid \
     && echo "root:100000:1000000000" > /etc/subgid

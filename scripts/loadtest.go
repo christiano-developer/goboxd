@@ -87,6 +87,23 @@ var payloads = map[string]PayloadConfig{
 		Source:         "console.log('hello')",
 		ExpectedStdout: "hello\n",
 	},
+	"php": {
+		Language:       "php",
+		Source:         "<?php echo \"hello\\n\";",
+		ExpectedStdout: "hello\n",
+	},
+	"kotlin": {
+		Language:         "kotlin",
+		Source:           "fun main() { println(\"hello\") }",
+		SourceFilename:   "solution.kt",
+		ArtifactFilename: "solution.jar",
+		ExpectedStdout:   "hello\n",
+	},
+	"lisp": {
+		Language:       "lisp",
+		Source:         "(format t \"hello~%\")",
+		ExpectedStdout: "hello\n",
+	},
 	"verilog": {
 		Language:       "verilog",
 		Source:         "module Main; initial begin $display(\"hello\"); $finish; end endmodule",
@@ -98,7 +115,7 @@ func main() {
 	concurrency := flag.Int("c", 10, "Number of concurrent workers")
 	totalReqs := flag.Int("n", 100, "Total number of requests to run")
 	targetURL := flag.String("url", "http://localhost:8080/run", "Target endpoint URL")
-	lang := flag.String("lang", "py3", "Language payload to run (py3, c, cpp, java, bash, js, verilog, mixed)")
+	lang := flag.String("lang", "py3", "Language payload to run (py3, c, cpp, java, bash, js, php, kotlin, lisp, verilog, mixed)")
 	flag.Parse()
 
 	if *concurrency <= 0 || *totalReqs <= 0 {
@@ -113,7 +130,7 @@ func main() {
 		var ok bool
 		staticConfig, ok = payloads[*lang]
 		if !ok {
-			fmt.Printf("Unsupported language: %s. Supported: py3, c, cpp, java, bash, js, verilog, mixed\n", *lang)
+			fmt.Printf("Unsupported language: %s. Supported: py3, c, cpp, java, bash, js, php, kotlin, lisp, verilog, mixed\n", *lang)
 			os.Exit(1)
 		}
 	}
@@ -150,7 +167,7 @@ func main() {
 				var selectedLang string
 
 				if isMixed {
-					keys := []string{"py3", "c", "cpp", "java", "bash", "js", "verilog"}
+					keys := []string{"py3", "c", "cpp", "java", "bash", "js", "php", "kotlin", "lisp", "verilog"}
 					selectedLang = keys[rand.Intn(len(keys))]
 					config := payloads[selectedLang]
 
