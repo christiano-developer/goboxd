@@ -186,3 +186,48 @@ Implemented the changes across `pool.go`, `validate.go`, `handler.go`, `info.go`
 
 **What we used / didn't use:**
 Implemented all proposed changes. Verified with new test cases covering rate tracking, priority sorting, aging, and load-shedding.
+
+---
+
+## 2026-06-12 · Plug-and-play language test: adding PHP
+
+**Prompt:**
+Test the plug-and-play registry by adding PHP, and append the load tester (`scripts/loadtest.go`) for PHP too.
+
+**Response summary:**
+Confirmed the registry is pure-YAML, so a new language needs no Go changes — only a `languages.yaml` entry plus the runtime toolchain in the Docker image. Added an interpreted `php` entry (`/usr/bin/php {{source}}`), a `php` payload to the load tester, and wired `php` into the `mixed` rotation and the usage strings. Noted that `/readyz` smoke-checks new languages automatically via its `--version` fallback (no handler change needed). PHP was already present in the runtime Dockerfile stage.
+
+**What we used / didn't use:**
+Used the YAML-only path. PHP ran first try end-to-end (`accepted`, `hello`). Confirmed the principle that interpreted languages are effectively zero-friction to add.
+
+---
+
+## 2026-06-12 · Adding Kotlin and Lisp — three sandbox issues, all solved without touching Go
+
+**Prompt:**
+Add two more languages, Kotlin and Lisp, and keep it plug-and-play (no edits to the core Go files).
+
+**Response summary:**
+Added `kotlin` (compiled: `kotlinc` build → `java` run) and `lisp` (SBCL, interpreted) YAML entries, installed `sbcl` and the Kotlin compiler in the runtime Docker stage, and extended the load tester. The first end-to-end run surfaced three distinct sandbox failures, each diagnosed by reproducing the exact `nsjail` invocation inside the container:
+
+1. **Lisp — `os_alloc_gc_space ... ENOMEM`.** SBCL reserves ~1 GB of *virtual* address space at boot; nsjail's `--rlimit_as` (derived from `memory_kb`) was far below it. Fix: bound SBCL's heap with `--dynamic-space-size 256` and raise `memory_kb` so the virtual reservation fits.
+2. **Kotlin build — silent failure, then `java.io.IOException: Map failed`.** The compiler JVM reserves multiple GB of virtual space. Mirrored the existing Java entry's `-J-XX` flags (`+UseSerialGC`, `CompressedClassSpaceSize`, bounded `-Xmx`) to collapse the reservation under `rlimit_as`.
+3. **Kotlin build — `Caused by: java.io.IOException: File too large`.** The decisive clue. `-include-runtime` bundles `kotlin-stdlib` into a ~4.7 MB fat jar, but nsjail defaults `RLIMIT_FSIZE` to **1 MB**, so the sandbox could not write the artifact. Since the core Go (`sandbox/nsjail.go`, which would set `--rlimit_fsize`) was off-limits, we *removed* the unwanted bundled binary instead: drop `-include-runtime` to emit a ~1 KB thin jar, and load the host-installed `kotlin-stdlib.jar` (read-only, exempt from `RLIMIT_FSIZE`) on the classpath at run time via `-cp {{artifact}}:/opt/kotlinc/lib/kotlin-stdlib.jar SolutionKt`.
+
+Iterated by `docker cp`-ing the edited `languages.yaml` into the running container and restarting (registry reloads at startup), avoiding a full rebuild per attempt.
+
+**What we used / didn't use:**
+Used the config-only approach throughout — a proposed `--rlimit_fsize` addition to `sandbox/nsjail.go` was explicitly rejected to keep the change plug-and-play, so we worked around the 1 MB cap by shrinking the artifact. All three languages ended `accepted`. Open caveat recorded: the 1 MB `RLIMIT_FSIZE` is sidestepped, not fixed — a future language whose sandbox-written artifact exceeds 1 MB will need the Go change.
+
+---
+
+## 2026-06-12 · Load-testing all 10 languages
+
+**Prompt:**
+Use the load test file and test.
+
+**Response summary:**
+Ran `scripts/loadtest.go` against the live server: per-language passes for `php`, `lisp`, `kotlin` (12 requests each, concurrency 4), then a `mixed` pass (60 requests, concurrency 6) exercising all ten languages plus the random under/over-allocation override injection. PHP ~18 ms p50, Lisp ~12 ms p50, Kotlin ~2.2 s p50 (JVM compile dominates). All individual runs were 12/12 `accepted`. Mixed: 60/60 HTTP 200, 54 `accepted`, 6 `runtime_error`, 63 clamp warnings — the errors and warnings being the deliberately-injected 256 KB under-allocations and over-allocation clamps, i.e. the load tester verifying the limit machinery rather than language failures.
+
+**What we used / didn't use:**
+Used the existing load tester as-is with the new payloads. Confirmed all ten languages pass under concurrency; interpreted the mixed-mode `runtime_error`/warning counts as expected behaviour, not regressions.
