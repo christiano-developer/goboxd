@@ -47,6 +47,7 @@ def main():
     pre = (prefix + "_") if prefix else ""
     bp_png = f"{outdir}/{pre}breaking-point.png"
     lat_png = f"{outdir}/{pre}latency.png"
+    waste_png = f"{outdir}/{pre}wasted-work.png"
 
     rows = load(path)
     rps = [float(r["target_rps"]) for r in rows]
